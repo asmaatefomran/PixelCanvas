@@ -97,3 +97,48 @@ void Circle::FillWithCircles(int xc, int yc, int R) {
         DrawCircleModifiedMidpoint(xc, yc, R, randomColor);
     }
 }
+
+void Circle::Draw2Lines(int xc, int yc, int x, int y, COLORREF c, int quarter) {
+    switch (quarter) {
+    case 1:
+        DrawLineDDA(xc, yc, xc + x, yc, c);     
+        DrawLineDDA(xc, yc, xc, yc - y, c);     
+        break;
+    case 2:
+        DrawLineDDA(xc, yc, xc - x, yc, c);      
+        DrawLineDDA(xc, yc, xc, yc - y, c);      
+        break;
+    case 3:
+        DrawLineDDA(xc, yc, xc - x, yc, c);      
+        DrawLineDDA(xc, yc, xc, yc + y, c);      
+        break;
+    case 4:
+        DrawLineDDA(xc, yc, xc + x, yc, c);      
+        DrawLineDDA(xc, yc, xc, yc + y, c);      
+        break;
+    }
+}
+
+void Circle::FillQuarter(int xc, int yc, int R, COLORREF c, int quarter) {
+    int x = 0, y = R;
+    int d = 1 - R;
+    int d1 = 3, d2 = 5 - 2 * R;
+    DrawCircleModifiedMidpoint(xc, yc, R, c);
+    Draw2Lines(hdc, xc, yc, x, y, c);
+    while (x < y) {
+        if (d < 0) {
+            d += d1;
+            d1 += 2;
+            d2 += 2;
+            x++;
+        } else {
+            d += d2;
+            d1 += 2;
+            d2 += 4;
+            x++;
+            y--;
+        }
+        Draw2Lines(hdc, xc, yc, x, y, c);
+    }
+}
+
