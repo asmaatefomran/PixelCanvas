@@ -14,6 +14,26 @@ void Circle::Draw8Points(int xc, int yc, int x, int y, COLORREF c) {
     SetPixel(hdc, xc + y, yc - x, c);
     SetPixel(hdc, xc - y, yc - x, c);
 }
+void Circle::Draw2Points(int xc, int yc, int x, int y, COLORREF c, int quarter) {
+    switch (quarter) {
+        case 1:  // Top-right
+            SetPixel(hdc, xc + x, yc - y, c);
+            SetPixel(hdc, xc + y, yc - x, c);
+            break;
+        case 2:  // Top-left
+            SetPixel(hdc, xc - x, yc - y, c);
+            SetPixel(hdc, xc - y, yc - x, c);
+            break;
+        case 3:  // Bottom-left
+            SetPixel(hdc, xc - x, yc + y, c);
+            SetPixel(hdc, xc - y, yc + x, c);
+            break;
+        case 4:  // Bottom-right
+            SetPixel(hdc, xc + x, yc + y, c);
+            SetPixel(hdc, xc + y, yc + x, c);
+            break;
+    }
+}
 
 
 void Circle::DrawCircleDirect(int xc, int yc, int R, COLORREF c) {
@@ -88,7 +108,38 @@ void Circle::DrawCircleModifiedMidpoint(int xc, int yc, int R, COLORREF c) {
         Draw8Points(xc, yc, x, y, c);
     }
 }
+void Circle::DrawQuarterCircleModifiedMidpoint(int xc, int yc, int R, COLORREF c,int quarter) {
+    int x = 0, y = R;
+    int d = 1 - R;
+    int d1 = 3, d2 = 5 - 2 * R;
 
+    Draw2Points(xc, yc, x, y, c,quarter);
+
+    while (x < y) {
+        if (d < 0) {
+            d += d1;
+            d1 += 2;
+            d2 += 2;
+            x++;
+        } else {
+            d += d2;
+            d1 += 2;
+            d2 += 4;
+            x++;
+            y--;
+        }
+        Draw2Points(xc, yc, x, y, c,quarter);
+    }
+}
+void Circle::FillQuarterWithCircles(int xc, int yc, int R, int quarter) {
+    int dec = R / 100;
+    if (dec == 0) dec = 1;
+    while (R > 0) {
+        R -= dec;
+        COLORREF randomColor = RGB(rand() % 256, rand() % 256, rand() % 256);
+        DrawQuarterCircleModifiedMidpoint( xc, yc,  R, randomColor, quarter);
+    }
+}
 void Circle::FillWithCircles(int xc, int yc, int R) {
     int dec = R / 100;
     if (dec == 0) dec = 1;
@@ -119,7 +170,17 @@ void Circle::Draw2Lines(int xc, int yc, int x, int y, COLORREF c, int quarter) {
             break;
     }
 }
-void Circle::FillQuarter(int xc, int yc, int R, COLORREF c, int quarter) {
+void Circle::Draw8Lines(int xc, int yc, int x, int y, COLORREF c) {
+            line.DrawLineDDA(xc, yc, xc +x, yc-y, c);
+            line.DrawLineDDA(xc, yc, xc+y, yc - x, c);
+            line.DrawLineDDA(xc, yc, xc -x, yc-y, c);
+            line.DrawLineDDA(xc, yc, xc-y, yc - x, c);
+            line.DrawLineDDA(xc, yc, xc -x, yc+y, c);
+            line.DrawLineDDA(xc, yc, xc-y, yc + x, c);
+            line.DrawLineDDA(xc, yc, xc + x, yc+y, c);
+            line.DrawLineDDA(xc, yc, xc+y, yc + x, c);
+}
+void Circle::FillQuarterWithLines(int xc, int yc, int R, COLORREF c, int quarter) {
     int x = 0, y = R;
     int d = 1 - R;
     int d1 = 3, d2 = 5 - 2 * R;
@@ -139,6 +200,28 @@ void Circle::FillQuarter(int xc, int yc, int R, COLORREF c, int quarter) {
             y--;
         }
         Draw2Lines(xc, yc, x, y, c, quarter);
+    }
+}
+void Circle::FillWithLines(int xc, int yc, int R, COLORREF c) {
+    int x = 0, y = R;
+    int d = 1 - R;
+    int d1 = 3, d2 = 5 - 2 * R;
+    DrawCircleModifiedMidpoint(xc, yc, R, c);
+    Draw8Lines(xc, yc, x, y, c);
+    while (x < y) {
+        if (d < 0) {
+            d += d1;
+            d1 += 2;
+            d2 += 2;
+            x++;
+        } else {
+            d += d2;
+            d1 += 2;
+            d2 += 4;
+            x++;
+            y--;
+        }
+        Draw8Lines(xc, yc, x, y, c);
     }
 }
 
