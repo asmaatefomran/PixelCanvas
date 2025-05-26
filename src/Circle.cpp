@@ -101,25 +101,24 @@ void Circle::FillWithCircles(int xc, int yc, int R) {
 
 void Circle::Draw2Lines(int xc, int yc, int x, int y, COLORREF c, int quarter) {
     switch (quarter) {
-    case 1:
-        line.DrawLineDDA(xc, yc, xc + x, yc, c);
-        line.DrawLineDDA(xc, yc, xc, yc - y, c);
-        break;
-    case 2:
-        line.DrawLineDDA(xc, yc, xc - x, yc, c);
-        line.DrawLineDDA(xc, yc, xc, yc - y, c);
-        break;
-    case 3:
-        line.DrawLineDDA(xc, yc, xc - x, yc, c);
-        line.DrawLineDDA(xc, yc, xc, yc + y, c);
-        break;
-    case 4:
-        line.DrawLineDDA(xc, yc, xc + x, yc, c);
-        line.DrawLineDDA(xc, yc, xc, yc + y, c);
-        break;
+        case 1:  // Top-right
+            line.DrawLineDDA(xc, yc, xc +x, yc-y, c);
+            line.DrawLineDDA(xc, yc, xc+y, yc - x, c);
+            break;
+        case 2:  // Top-left
+            line.DrawLineDDA(xc, yc, xc -x, yc-y, c);
+            line.DrawLineDDA(xc, yc, xc-y, yc - x, c);
+            break;
+        case 3:  // Bottom-left
+            line.DrawLineDDA(xc, yc, xc -x, yc+y, c);
+            line.DrawLineDDA(xc, yc, xc-y, yc + x, c);
+            break;
+        case 4:  // Bottom-right
+            line.DrawLineDDA(xc, yc, xc + x, yc+y, c);
+            line.DrawLineDDA(xc, yc, xc+y, yc + x, c);
+            break;
     }
 }
-
 void Circle::FillQuarter(int xc, int yc, int R, COLORREF c, int quarter) {
     int x = 0, y = R;
     int d = 1 - R;
