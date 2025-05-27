@@ -18,7 +18,7 @@ void Curve::DrawHermite(int x0, int y0, int x1, int y1, int t0, int t1, COLORREF
 }
 
 void Curve::FillWithHermite(int x1, int y1, int x2, int y2, COLORREF color) {
-    int step = 2;
+    int step = 1;
     for (int x = x1; x <= x2; x += step) {
         DrawHermite(x, y1, x, y2, 40, 40, color);
     }
@@ -35,7 +35,7 @@ void Curve::DrawBezier(int x0, int y0, int x1, int y1, int x2, int y2, int x3, i
 }
 
 void Curve::FillWithBezier(int x1, int y1, int x2, int y2, COLORREF color) {
-    int step = 2;
+    int step = 1;
     for (int y = y1; y <= y2; y += step) {
         DrawBezier(x1, y, x1 + 20, y - 20, x2 - 20, y + 20, x2, y, color);
     }
