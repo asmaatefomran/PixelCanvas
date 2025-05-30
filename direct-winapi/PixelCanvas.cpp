@@ -164,6 +164,7 @@ void HandleShapeSelection();
 void HandleAlgorithmSelection();
 HFONT CreateCustomFont(int size, bool bold);
 void UpdateAlgorithmDropdown();
+void UpdateInstructions();
 
 // Entry point
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
@@ -228,6 +229,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     // Initialize drawing buffer
     InitializeDrawingBuffer(g_hwnd);
+
+    // Update instructions in the status bar
+    UpdateInstructions();
 
     // Run the message loop
     MSG msg = {};
@@ -371,8 +375,8 @@ void CreateStatusBar(HWND hwnd) {
         hwnd, NULL, GetModuleHandle(NULL), NULL
     );
 
-    // Set initial status
-    UpdateStatusBar(L"Ready. Draw using the mouse. Current tool: Line, Algorithm: DDA");
+    // Set initial status with instructions
+    UpdateInstructions();
 }
 
 void CreateControls(HWND hwnd) {
@@ -601,6 +605,9 @@ void HandleMenuSelection(HWND hwnd, WPARAM wParam) {
             
             // Update the UI controls to match the selection
             UpdateControlsFromSelection();
+            
+            // Update instructions in the status bar
+            UpdateInstructions();
             break;
 
         // Algorithm selection
@@ -893,31 +900,8 @@ void HandleShapeSelection() {
     // Update the algorithm dropdown to show appropriate algorithms for this tool
     UpdateAlgorithmDropdown();
     
-    // Update status bar
-    wchar_t statusText[256];
-    const wchar_t* toolName = 
-        (g_currentTool == ID_TOOL_LINE) ? L"Line" :
-        (g_currentTool == ID_TOOL_CIRCLE) ? L"Circle" :
-        (g_currentTool == ID_TOOL_ELLIPSE) ? L"Ellipse" :
-        (g_currentTool == ID_TOOL_CURVE) ? L"Curve" :
-        (g_currentTool == ID_TOOL_POLYGON) ? L"Polygon" : L"Clipping";
-    
-    const wchar_t* algoName;
-    switch (g_currentAlgorithm) {
-        case ID_ALGO_DDA: algoName = L"DDA"; break;
-        case ID_ALGO_MIDPOINT: algoName = L"Midpoint"; break;
-        case ID_ALGO_PARAMETRIC: algoName = L"Parametric"; break;
-        case ID_ALGO_POLAR: algoName = L"Polar"; break;
-        case ID_ALGO_BEZIER: algoName = L"Bezier"; break;
-        case ID_ALGO_HERMITE: algoName = L"Hermite"; break;
-        case ID_ALGO_COHEN_SUTHERLAND: algoName = L"Cohen-Sutherland"; break;
-        case ID_ALGO_LIANG_BARSKY: algoName = L"Liang-Barsky"; break;
-        default: algoName = L"Unknown"; break;
-    }
-    
-    _snwprintf(statusText, 256, L"Current tool: %s, Algorithm: %s, Thickness: %d", 
-             toolName, algoName, g_lineThickness);
-    UpdateStatusBar(statusText);
+    // Update instructions in the status bar
+    UpdateInstructions();
 }
 
 void HandleAlgorithmSelection() {
@@ -988,31 +972,8 @@ void HandleAlgorithmSelection() {
     // Check new algorithm in menu
     CheckMenuItem(g_hAlgoMenu, g_currentAlgorithm, MF_BYCOMMAND | MF_CHECKED);
     
-    // Update status bar
-    wchar_t statusText[256];
-    const wchar_t* toolName = 
-        (g_currentTool == ID_TOOL_LINE) ? L"Line" :
-        (g_currentTool == ID_TOOL_CIRCLE) ? L"Circle" :
-        (g_currentTool == ID_TOOL_ELLIPSE) ? L"Ellipse" :
-        (g_currentTool == ID_TOOL_CURVE) ? L"Curve" :
-        (g_currentTool == ID_TOOL_POLYGON) ? L"Polygon" : L"Clipping";
-    
-    const wchar_t* algoName;
-    switch (g_currentAlgorithm) {
-        case ID_ALGO_DDA: algoName = L"DDA"; break;
-        case ID_ALGO_MIDPOINT: algoName = L"Midpoint"; break;
-        case ID_ALGO_PARAMETRIC: algoName = L"Parametric"; break;
-        case ID_ALGO_POLAR: algoName = L"Polar"; break;
-        case ID_ALGO_BEZIER: algoName = L"Bezier"; break;
-        case ID_ALGO_HERMITE: algoName = L"Hermite"; break;
-        case ID_ALGO_COHEN_SUTHERLAND: algoName = L"Cohen-Sutherland"; break;
-        case ID_ALGO_LIANG_BARSKY: algoName = L"Liang-Barsky"; break;
-        default: algoName = L"Unknown"; break;
-    }
-    
-    _snwprintf(statusText, 256, L"Current tool: %s, Algorithm: %s, Thickness: %d", 
-             toolName, algoName, g_lineThickness);
-    UpdateStatusBar(statusText);
+    // Update instructions in the status bar
+    UpdateInstructions();
     
     // No need to update the combo box itself as it's already set
 }
@@ -1090,6 +1051,59 @@ void UpdateAlgorithmDropdown() {
     SendMessage(g_hAlgorithmCombo, CB_SETCURSEL, 0, 0);
 }
 
+void UpdateInstructions() {
+    wchar_t statusText[256];
+    const wchar_t* toolName = 
+        (g_currentTool == ID_TOOL_LINE) ? L"Line" :
+        (g_currentTool == ID_TOOL_CIRCLE) ? L"Circle" :
+        (g_currentTool == ID_TOOL_ELLIPSE) ? L"Ellipse" :
+        (g_currentTool == ID_TOOL_CURVE) ? L"Curve" :
+        (g_currentTool == ID_TOOL_POLYGON) ? L"Polygon" : L"Clipping";
+    
+    const wchar_t* algoName;
+    switch (g_currentAlgorithm) {
+        case ID_ALGO_DDA: algoName = L"DDA"; break;
+        case ID_ALGO_MIDPOINT: algoName = L"Midpoint"; break;
+        case ID_ALGO_PARAMETRIC: algoName = L"Parametric"; break;
+        case ID_ALGO_POLAR: algoName = L"Polar"; break;
+        case ID_ALGO_BEZIER: algoName = L"Bezier"; break;
+        case ID_ALGO_HERMITE: algoName = L"Hermite"; break;
+        case ID_ALGO_COHEN_SUTHERLAND: algoName = L"Cohen-Sutherland"; break;
+        case ID_ALGO_LIANG_BARSKY: algoName = L"Liang-Barsky"; break;
+        default: algoName = L"Unknown"; break;
+    }
+    
+    // Add user-friendly instructions based on the current tool
+    const wchar_t* instructions;
+    switch (g_currentTool) {
+        case ID_TOOL_LINE:
+            instructions = L"Click and drag to draw a line";
+            break;
+        case ID_TOOL_CIRCLE:
+            instructions = L"Click at center point and drag to set radius";
+            break;
+        case ID_TOOL_ELLIPSE:
+            instructions = L"Click at center point and drag to set dimensions";
+            break;
+        case ID_TOOL_CURVE:
+            instructions = L"Click for control points, double-click to finish curve";
+            break;
+        case ID_TOOL_POLYGON:
+            instructions = L"Click for each vertex, right-click to close polygon";
+            break;
+        case ID_TOOL_CLIP:
+            instructions = L"Click and drag to define clipping window";
+            break;
+        default:
+            instructions = L"Select a tool to begin drawing";
+            break;
+    }
+    
+    _snwprintf(statusText, 256, L"%s: %s. Tool: %s, Algorithm: %s, Thickness: %d", 
+             toolName, instructions, toolName, algoName, g_lineThickness);
+    UpdateStatusBar(statusText);
+}
+
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
         case WM_DESTROY:
@@ -1132,31 +1146,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             if ((HWND)lParam == g_hThicknessSlider) {
                 g_lineThickness = (int)SendMessage(g_hThicknessSlider, TBM_GETPOS, 0, 0);
                 
-                // Update status bar
-                wchar_t statusText[256];
-                const wchar_t* toolName = 
-                    (g_currentTool == ID_TOOL_LINE) ? L"Line" :
-                    (g_currentTool == ID_TOOL_CIRCLE) ? L"Circle" :
-                    (g_currentTool == ID_TOOL_ELLIPSE) ? L"Ellipse" :
-                    (g_currentTool == ID_TOOL_CURVE) ? L"Curve" :
-                    (g_currentTool == ID_TOOL_POLYGON) ? L"Polygon" : L"Clipping";
-                
-                const wchar_t* algoName;
-                switch (g_currentAlgorithm) {
-                    case ID_ALGO_DDA: algoName = L"DDA"; break;
-                    case ID_ALGO_MIDPOINT: algoName = L"Midpoint"; break;
-                    case ID_ALGO_PARAMETRIC: algoName = L"Parametric"; break;
-                    case ID_ALGO_POLAR: algoName = L"Polar"; break;
-                    case ID_ALGO_BEZIER: algoName = L"Bezier"; break;
-                    case ID_ALGO_HERMITE: algoName = L"Hermite"; break;
-                    case ID_ALGO_COHEN_SUTHERLAND: algoName = L"Cohen-Sutherland"; break;
-                    case ID_ALGO_LIANG_BARSKY: algoName = L"Liang-Barsky"; break;
-                    default: algoName = L"Unknown"; break;
-                }
-                
-                _snwprintf(statusText, 256, L"Current tool: %s, Algorithm: %s, Thickness: %d", 
-                         toolName, algoName, g_lineThickness);
-                UpdateStatusBar(statusText);
+                // Update instructions in the status bar
+                UpdateInstructions();
                 
                 return 0;
             }
