@@ -142,6 +142,8 @@ int g_ellipseClickCount = 0;
 POINT g_ellipseCenter = {0, 0};
 POINT g_ellipsePoint1 = {0, 0};
 POINT g_ellipsePoint2 = {0, 0};
+int g_ellipseA = 0; // Semi-major axis
+int g_ellipseB = 0; // Semi-minor axis
 
 // Double buffering
 HDC g_hdcMem = NULL;
@@ -1294,30 +1296,24 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         int point1X = g_ellipsePoint1.x + g_canvasRect.left;
                         int point1Y = g_ellipsePoint1.y + g_canvasRect.top;
                         
-                        // Draw first axis
-                        MoveToEx(hdc, centerX, centerY, NULL);
-                        LineTo(hdc, point1X, point1Y);
-                        
                         // Draw first point
                         Ellipse(hdc, point1X - 3, point1Y - 3, point1X + 3, point1Y + 3);
+                        
+                        // Draw guide line from center to first point
+                        MoveToEx(hdc, centerX, centerY, NULL);
+                        LineTo(hdc, point1X, point1Y);
                         
                         if (g_ellipseClickCount >= 2) {
                             // Second axis point
                             int point2X = g_ellipsePoint2.x + g_canvasRect.left;
                             int point2Y = g_ellipsePoint2.y + g_canvasRect.top;
                             
-                            // Draw second axis
-                            MoveToEx(hdc, centerX, centerY, NULL);
-                            LineTo(hdc, point2X, point2Y);
-                            
                             // Draw second point
                             Ellipse(hdc, point2X - 3, point2Y - 3, point2X + 3, point2Y + 3);
                             
-                            // Show what the ellipse will look like
-                            int radiusX = std::max(abs(g_ellipsePoint1.x - g_ellipseCenter.x), abs(g_ellipsePoint2.x - g_ellipseCenter.x));
-                            int radiusY = std::max(abs(g_ellipsePoint1.y - g_ellipseCenter.y), abs(g_ellipsePoint2.y - g_ellipseCenter.y));
-                            
-                            Ellipse(hdc, centerX - radiusX, centerY - radiusY, centerX + radiusX, centerY + radiusY);
+                            // Draw guide line from center to second point
+                            MoveToEx(hdc, centerX, centerY, NULL);
+                            LineTo(hdc, point2X, point2Y);
                         }
                     }
                     
@@ -1387,27 +1383,39 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                             g_ellipsePoint1.y = y;
                             g_ellipseClickCount++;
                             
-                            // Draw a small point and a line to show first axis
+                            // Draw a small point
                             DrawCircle(g_hdcMem, x, y, 2, g_currentColor, 1);
-                            DrawLine(g_hdcMem, g_ellipseCenter.x, g_ellipseCenter.y, x, y, g_currentColor, 1);
                             InvalidateRect(hwnd, &g_canvasRect, FALSE);
                             
                             // Update status bar with next instruction
                             UpdateEllipseStatus();
                         }
                         else if (g_ellipseClickCount == 2) {
-                            // Third click - store second axis point and draw the ellipse
+                            // Third click - store second axis point
                             g_ellipsePoint2.x = x;
                             g_ellipsePoint2.y = y;
                             
-                            // Calculate semi-major and semi-minor axes
-                            int radiusX = std::max(abs(g_ellipsePoint1.x - g_ellipseCenter.x), abs(g_ellipsePoint2.x - g_ellipseCenter.x));
-                            int radiusY = std::max(abs(g_ellipsePoint1.y - g_ellipseCenter.y), abs(g_ellipsePoint2.y - g_ellipseCenter.y));
+                            // Calculate a and b for the ellipse
+                            g_ellipseA = std::max(abs(g_ellipsePoint1.x - g_ellipseCenter.x), abs(g_ellipsePoint2.x - g_ellipseCenter.x));
+                            g_ellipseB = std::max(abs(g_ellipsePoint1.y - g_ellipseCenter.y), abs(g_ellipsePoint2.y - g_ellipseCenter.y));
                             
-                            // Draw the ellipse
-                            DrawEllipse(g_hdcMem, g_ellipseCenter.x, g_ellipseCenter.y, radiusX, radiusY, g_currentColor, g_lineThickness);
+                            // Draw the ellipse using the selected algorithm
+                            switch (g_currentAlgorithm) {
+                                case ID_ALGO_MIDPOINT:
+                                    // Draw ellipse using midpoint algorithm
+                                    DrawEllipse(g_hdcMem, g_ellipseCenter.x, g_ellipseCenter.y, g_ellipseA, g_ellipseB, g_currentColor, g_lineThickness);
+                                    break;
+                                case ID_ALGO_PARAMETRIC:
+                                    // Draw ellipse using parametric algorithm
+                                    DrawEllipse(g_hdcMem, g_ellipseCenter.x, g_ellipseCenter.y, g_ellipseA, g_ellipseB, g_currentColor, g_lineThickness);
+                                    break;
+                                default:
+                                    // Default ellipse drawing
+                                    DrawEllipse(g_hdcMem, g_ellipseCenter.x, g_ellipseCenter.y, g_ellipseA, g_ellipseB, g_currentColor, g_lineThickness);
+                                    break;
+                            }
                             
-                            // Reset click counter
+                            // Reset click counter for next ellipse
                             g_ellipseClickCount = 0;
                             
                             // Invalidate the canvas area to redraw
