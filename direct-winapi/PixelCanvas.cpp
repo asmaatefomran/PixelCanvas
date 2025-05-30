@@ -13,6 +13,7 @@
 #include <commdlg.h>
 #include <math.h>
 #include <iostream>
+#include <algorithm> // For std::max
 
 // Include the common controls library (Visual Studio only)
 #if defined(_MSC_VER)
@@ -136,6 +137,12 @@ POINT g_startPoint = {0, 0};
 POINT g_endPoint = {0, 0};
 std::vector<POINT> g_polygonPoints;
 
+// For ellipse 3-point drawing
+int g_ellipseClickCount = 0;
+POINT g_ellipseCenter = {0, 0};
+POINT g_ellipsePoint1 = {0, 0};
+POINT g_ellipsePoint2 = {0, 0};
+
 // Double buffering
 HDC g_hdcMem = NULL;
 HBITMAP g_hbmMem = NULL;
@@ -165,6 +172,13 @@ void HandleAlgorithmSelection();
 HFONT CreateCustomFont(int size, bool bold);
 void UpdateAlgorithmDropdown();
 void UpdateInstructions();
+
+// Update status bar with ellipse drawing progress
+void UpdateEllipseStatus() {
+    // Call the main instructions update function which now handles
+    // ellipse instructions based on the click count
+    UpdateInstructions();
+}
 
 // Entry point
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
@@ -600,6 +614,11 @@ void HandleMenuSelection(HWND hwnd, WPARAM wParam) {
                 g_polygonPoints.clear();
             }
             
+            // Reset ellipse click counter if changing from ellipse
+            if (g_currentTool != ID_TOOL_ELLIPSE) {
+                g_ellipseClickCount = 0;
+            }
+            
             // Update the algorithm dropdown to show appropriate algorithms for this tool
             UpdateAlgorithmDropdown();
             
@@ -897,6 +916,11 @@ void HandleShapeSelection() {
         g_polygonPoints.clear();
     }
     
+    // Reset ellipse click counter if changing from ellipse
+    if (g_currentTool != ID_TOOL_ELLIPSE) {
+        g_ellipseClickCount = 0;
+    }
+    
     // Update the algorithm dropdown to show appropriate algorithms for this tool
     UpdateAlgorithmDropdown();
     
@@ -1083,7 +1107,14 @@ void UpdateInstructions() {
             instructions = L"Click at center point and drag to set radius";
             break;
         case ID_TOOL_ELLIPSE:
-            instructions = L"Click at center point and drag to set dimensions";
+            if (g_ellipseClickCount == 0)
+                instructions = L"Click to place center point";
+            else if (g_ellipseClickCount == 1)
+                instructions = L"Click to define first axis point";
+            else if (g_ellipseClickCount == 2)
+                instructions = L"Click to define second axis point";
+            else
+                instructions = L"Click 3 points: 1) center, 2) first axis, 3) second axis";
             break;
         case ID_TOOL_CURVE:
             instructions = L"Click for control points, double-click to finish curve";
@@ -1186,6 +1217,115 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                        g_canvasRect.bottom - g_canvasRect.top, 
                        g_hdcMem, 0, 0, SRCCOPY);
                 
+                // Draw temporary guidelines for shapes in progress
+                if (g_isDrawing) {
+                    // Convert to screen coordinates
+                    int startX = g_startPoint.x + g_canvasRect.left;
+                    int startY = g_startPoint.y + g_canvasRect.top;
+                    int endX = g_endPoint.x + g_canvasRect.left;
+                    int endY = g_endPoint.y + g_canvasRect.top;
+                    
+                    // Create dashed pen for guidelines
+                    LOGBRUSH lb;
+                    lb.lbStyle = BS_SOLID;
+                    lb.lbColor = g_currentColor;
+                    lb.lbHatch = 0;
+                    HPEN hDashedPen = ExtCreatePen(PS_COSMETIC | PS_DASH, 1, &lb, 0, NULL);
+                    HPEN hOldGuidePen = (HPEN)SelectObject(hdc, hDashedPen);
+                    
+                    switch (g_currentTool) {
+                        case ID_TOOL_LINE:
+                            MoveToEx(hdc, startX, startY, NULL);
+                            LineTo(hdc, endX, endY);
+                            break;
+                            
+                        case ID_TOOL_CIRCLE:
+                            {
+                                int dx = endX - startX;
+                                int dy = endY - startY;
+                                int radius = (int)sqrt((double)(dx*dx + dy*dy));
+                                
+                                // Draw temporary circle
+                                HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+                                Ellipse(hdc, startX - radius, startY - radius, startX + radius, startY + radius);
+                                
+                                // Draw a line showing the radius
+                                MoveToEx(hdc, startX, startY, NULL);
+                                LineTo(hdc, endX, endY);
+                                
+                                SelectObject(hdc, hOldBrush);
+                            }
+                            break;
+                            
+                        case ID_TOOL_CLIP:
+                            {
+                                // Draw temporary clipping rectangle
+                                HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+                                Rectangle(hdc, startX, startY, endX, endY);
+                                SelectObject(hdc, hOldBrush);
+                            }
+                            break;
+                    }
+                    
+                    SelectObject(hdc, hOldGuidePen);
+                    DeleteObject(hDashedPen);
+                }
+                
+                // Draw temporary visualization for ellipse drawing
+                if (g_currentTool == ID_TOOL_ELLIPSE && g_ellipseClickCount > 0) {
+                    // Create dashed pen for guidelines
+                    LOGBRUSH lb;
+                    lb.lbStyle = BS_SOLID;
+                    lb.lbColor = g_currentColor;
+                    lb.lbHatch = 0;
+                    HPEN hDashedPen = ExtCreatePen(PS_COSMETIC | PS_DASH, 1, &lb, 0, NULL);
+                    HPEN hOldGuidePen = (HPEN)SelectObject(hdc, hDashedPen);
+                    HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+                    
+                    // Convert to screen coordinates
+                    int centerX = g_ellipseCenter.x + g_canvasRect.left;
+                    int centerY = g_ellipseCenter.y + g_canvasRect.top;
+                    
+                    // Draw center point
+                    Ellipse(hdc, centerX - 3, centerY - 3, centerX + 3, centerY + 3);
+                    
+                    if (g_ellipseClickCount >= 1) {
+                        // First axis point
+                        int point1X = g_ellipsePoint1.x + g_canvasRect.left;
+                        int point1Y = g_ellipsePoint1.y + g_canvasRect.top;
+                        
+                        // Draw first axis
+                        MoveToEx(hdc, centerX, centerY, NULL);
+                        LineTo(hdc, point1X, point1Y);
+                        
+                        // Draw first point
+                        Ellipse(hdc, point1X - 3, point1Y - 3, point1X + 3, point1Y + 3);
+                        
+                        if (g_ellipseClickCount >= 2) {
+                            // Second axis point
+                            int point2X = g_ellipsePoint2.x + g_canvasRect.left;
+                            int point2Y = g_ellipsePoint2.y + g_canvasRect.top;
+                            
+                            // Draw second axis
+                            MoveToEx(hdc, centerX, centerY, NULL);
+                            LineTo(hdc, point2X, point2Y);
+                            
+                            // Draw second point
+                            Ellipse(hdc, point2X - 3, point2Y - 3, point2X + 3, point2Y + 3);
+                            
+                            // Show what the ellipse will look like
+                            int radiusX = std::max(abs(g_ellipsePoint1.x - g_ellipseCenter.x), abs(g_ellipsePoint2.x - g_ellipseCenter.x));
+                            int radiusY = std::max(abs(g_ellipsePoint1.y - g_ellipseCenter.y), abs(g_ellipsePoint2.y - g_ellipseCenter.y));
+                            
+                            Ellipse(hdc, centerX - radiusX, centerY - radiusY, centerX + radiusX, centerY + radiusY);
+                        }
+                    }
+                    
+                    SelectObject(hdc, hOldGuidePen);
+                    SelectObject(hdc, hOldBrush);
+                    DeleteObject(hDashedPen);
+                }
+                
                 // Clean up
                 SelectObject(hdc, hOldPen);
                 DeleteObject(hPen);
@@ -1204,17 +1344,17 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     y >= g_canvasRect.top && y <= g_canvasRect.bottom) {
                     
                     // Convert to canvas coordinates
-                    g_startPoint.x = x - g_canvasRect.left;
-                    g_startPoint.y = y - g_canvasRect.top;
-                    g_endPoint = g_startPoint;
+                    x = x - g_canvasRect.left;
+                    y = y - g_canvasRect.top;
                     
                     // Handle different tools
                     if (g_currentTool == ID_TOOL_POLYGON) {
                         // Add point to polygon
-                        g_polygonPoints.push_back(g_startPoint);
+                        POINT pt = {x, y};
+                        g_polygonPoints.push_back(pt);
                         
                         // Draw a small point to mark the vertex
-                        DrawCircle(g_hdcMem, g_startPoint.x, g_startPoint.y, 2, g_currentColor, 1);
+                        DrawCircle(g_hdcMem, x, y, 2, g_currentColor, 1);
                         
                         // If there are at least 2 points, draw a line between the last two
                         if (g_polygonPoints.size() >= 2) {
@@ -1226,7 +1366,61 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         // Invalidate the canvas area to redraw
                         InvalidateRect(hwnd, &g_canvasRect, FALSE);
                     }
+                    else if (g_currentTool == ID_TOOL_ELLIPSE) {
+                        // Handle 3-point ellipse drawing
+                        if (g_ellipseClickCount == 0) {
+                            // First click - store the center point
+                            g_ellipseCenter.x = x;
+                            g_ellipseCenter.y = y;
+                            g_ellipseClickCount++;
+                            
+                            // Draw a small point to mark the center
+                            DrawCircle(g_hdcMem, x, y, 2, g_currentColor, 1);
+                            InvalidateRect(hwnd, &g_canvasRect, FALSE);
+                            
+                            // Update status bar with next instruction
+                            UpdateEllipseStatus();
+                        }
+                        else if (g_ellipseClickCount == 1) {
+                            // Second click - store first axis point
+                            g_ellipsePoint1.x = x;
+                            g_ellipsePoint1.y = y;
+                            g_ellipseClickCount++;
+                            
+                            // Draw a small point and a line to show first axis
+                            DrawCircle(g_hdcMem, x, y, 2, g_currentColor, 1);
+                            DrawLine(g_hdcMem, g_ellipseCenter.x, g_ellipseCenter.y, x, y, g_currentColor, 1);
+                            InvalidateRect(hwnd, &g_canvasRect, FALSE);
+                            
+                            // Update status bar with next instruction
+                            UpdateEllipseStatus();
+                        }
+                        else if (g_ellipseClickCount == 2) {
+                            // Third click - store second axis point and draw the ellipse
+                            g_ellipsePoint2.x = x;
+                            g_ellipsePoint2.y = y;
+                            
+                            // Calculate semi-major and semi-minor axes
+                            int radiusX = std::max(abs(g_ellipsePoint1.x - g_ellipseCenter.x), abs(g_ellipsePoint2.x - g_ellipseCenter.x));
+                            int radiusY = std::max(abs(g_ellipsePoint1.y - g_ellipseCenter.y), abs(g_ellipsePoint2.y - g_ellipseCenter.y));
+                            
+                            // Draw the ellipse
+                            DrawEllipse(g_hdcMem, g_ellipseCenter.x, g_ellipseCenter.y, radiusX, radiusY, g_currentColor, g_lineThickness);
+                            
+                            // Reset click counter
+                            g_ellipseClickCount = 0;
+                            
+                            // Invalidate the canvas area to redraw
+                            InvalidateRect(hwnd, &g_canvasRect, FALSE);
+                            
+                            // Restore normal instructions
+                            UpdateInstructions();
+                        }
+                    }
                     else {
+                        g_startPoint.x = x;
+                        g_startPoint.y = y;
+                        g_endPoint = g_startPoint;
                         g_isDrawing = true;
                     }
                 }
@@ -1276,16 +1470,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                             }
                             break;
                             
-                        case ID_TOOL_ELLIPSE:
-                            {
-                                // Calculate radii
-                                int radiusX = abs(g_endPoint.x - g_startPoint.x);
-                                int radiusY = abs(g_endPoint.y - g_startPoint.y);
-                                
-                                DrawEllipse(g_hdcMem, g_startPoint.x, g_startPoint.y, radiusX, radiusY, g_currentColor, g_lineThickness);
-                            }
-                            break;
-                            
+                        // Note: Ellipse is now handled by the 3-point method in WM_LBUTTONDOWN
+                        
                         case ID_TOOL_CURVE:
                             // For now, just draw a line
                             DrawLine(g_hdcMem, g_startPoint.x, g_startPoint.y, g_endPoint.x, g_endPoint.y, g_currentColor, g_lineThickness);
