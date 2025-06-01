@@ -2,6 +2,11 @@
 #include <cmath>
 #include <cstdlib>
 
+// Define M_PI if not defined
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 Circle::Circle(HDC hdc) : hdc(hdc), line(hdc) {}
 
 void Circle::Draw8Points(int xc, int yc, int x, int y, COLORREF c) {

@@ -1,0 +1,25 @@
+# Build artifacts
+build/
+*.o
+*.obj
+*.exe
+
+# Temporary files
+temp/
+*.tmp
+
+# Backup files
+*_backup.*
+*_fix.*
+*_fixed_new.*
+
+# Build scripts that are not needed
+build_*.bat
+run_*.bat
+cleanup*.bat
+create_*.bat
+fix_*.bat
+
+# Other unnecessary directories
+simple-winapi-app/
+hta-app/ 
