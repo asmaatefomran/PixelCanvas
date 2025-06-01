@@ -2098,8 +2098,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     }
                     // Handle the fill checkbox
                     else if (LOWORD(wParam) == ID_FILL_CHECKBOX) {
-                        // Update the g_isFilled flag based on checkbox state
+                        // Get the current state of the checkbox after clicking
                         BOOL isChecked = (SendMessage(g_hFillCheckbox, BM_GETCHECK, 0, 0) == BST_CHECKED);
+                        
+                        // Update the g_isFilled flag
                         g_isFilled = (isChecked == TRUE);
                         
                         // Update status bar with clear message
@@ -2252,16 +2254,31 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         // Check the actual state of the checkbox directly - don't rely on g_isFilled
                         BOOL isChecked = (SendMessage(g_hFillCheckbox, BM_GETCHECK, 0, 0) == BST_CHECKED);
                         
+                        // Save current g_isFilled state
+                        bool savedFillState = g_isFilled;
+                        
                         // Add point to polygon
                         POINT pt = {x, y};
                         g_polygonPoints.push_back(pt);
                         
-                        // Draw a small point to mark the vertex - always fill with a small dot regardless of fill state
-                        DrawCircle(g_hdcMem, x, y, 2, g_currentColor, 1, true);
+                        // Draw a small point to mark the vertex - ALWAYS filled regardless of checkbox state
+                        // This avoids modifying g_isFilled
+                        HBRUSH hBrush = CreateSolidBrush(g_currentColor);
+                        HBRUSH hOldBrush = (HBRUSH)SelectObject(g_hdcMem, hBrush);
+                        HPEN hPen = CreatePen(PS_SOLID, 1, g_currentColor);
+                        HPEN hOldPen = (HPEN)SelectObject(g_hdcMem, hPen);
+                        
+                        // Draw a small filled circle manually without using g_isFilled
+                        Ellipse(g_hdcMem, x-2, y-2, x+2, y+2);
+                        
+                        // Restore original objects
+                        SelectObject(g_hdcMem, hOldBrush);
+                        SelectObject(g_hdcMem, hOldPen);
+                        DeleteObject(hBrush);
+                        DeleteObject(hPen);
                         
                         // Update g_isFilled with the actual checkbox state to keep them in sync
                         g_isFilled = (isChecked == TRUE);
-                        SendMessage(g_hFillCheckbox, BM_SETCHECK, g_isFilled ? BST_CHECKED : BST_UNCHECKED, 0);
                         
                         // If there are at least 2 points, draw a line between the last two
                         if (g_polygonPoints.size() >= 2) {
@@ -2281,8 +2298,20 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         if (g_polygonPoints.size() < 4) {
                             g_polygonPoints.push_back(pt);
                             
-                            // Draw a visible control point marker
-                            DrawCircle(g_hdcMem, x, y, 3, g_currentColor, 1, true);
+                            // Draw a visible control point marker without using g_isFilled
+                            HBRUSH hBrush = CreateSolidBrush(g_currentColor);
+                            HBRUSH hOldBrush = (HBRUSH)SelectObject(g_hdcMem, hBrush);
+                            HPEN hPen = CreatePen(PS_SOLID, 1, g_currentColor);
+                            HPEN hOldPen = (HPEN)SelectObject(g_hdcMem, hPen);
+                            
+                            // Draw a small filled circle manually
+                            Ellipse(g_hdcMem, x-3, y-3, x+3, y+3);
+                            
+                            // Restore original objects
+                            SelectObject(g_hdcMem, hOldBrush);
+                            SelectObject(g_hdcMem, hOldPen);
+                            DeleteObject(hBrush);
+                            DeleteObject(hPen);
                             
                             // Show status message with point count
                             wchar_t msg[256];
@@ -2341,8 +2370,21 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                             g_ellipseCenter.y = y;
                             g_ellipseClickCount++;
                             
-                            // Draw a small point to mark the center
-                            DrawCircle(g_hdcMem, x, y, 2, g_currentColor, 1, true);
+                            // Draw a small point to mark the center without using g_isFilled
+                            HBRUSH hBrush = CreateSolidBrush(g_currentColor);
+                            HBRUSH hOldBrush = (HBRUSH)SelectObject(g_hdcMem, hBrush);
+                            HPEN hPen = CreatePen(PS_SOLID, 1, g_currentColor);
+                            HPEN hOldPen = (HPEN)SelectObject(g_hdcMem, hPen);
+                            
+                            // Draw a small filled circle manually
+                            Ellipse(g_hdcMem, x-2, y-2, x+2, y+2);
+                            
+                            // Restore original objects
+                            SelectObject(g_hdcMem, hOldBrush);
+                            SelectObject(g_hdcMem, hOldPen);
+                            DeleteObject(hBrush);
+                            DeleteObject(hPen);
+                            
                             InvalidateRect(hwnd, &g_canvasRect, FALSE);
                             
                             // Update status bar with next instruction
@@ -2357,8 +2399,21 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                             g_ellipsePoint1.y = y;
                             g_ellipseClickCount++;
                             
-                            // Draw a small point
-                            DrawCircle(g_hdcMem, x, y, 2, g_currentColor, 1, true);
+                            // Draw a small point without using g_isFilled
+                            HBRUSH hBrush = CreateSolidBrush(g_currentColor);
+                            HBRUSH hOldBrush = (HBRUSH)SelectObject(g_hdcMem, hBrush);
+                            HPEN hPen = CreatePen(PS_SOLID, 1, g_currentColor);
+                            HPEN hOldPen = (HPEN)SelectObject(g_hdcMem, hPen);
+                            
+                            // Draw a small filled circle manually
+                            Ellipse(g_hdcMem, x-2, y-2, x+2, y+2);
+                            
+                            // Restore original objects
+                            SelectObject(g_hdcMem, hOldBrush);
+                            SelectObject(g_hdcMem, hOldPen);
+                            DeleteObject(hBrush);
+                            DeleteObject(hPen);
+                            
                             InvalidateRect(hwnd, &g_canvasRect, FALSE);
                             
                             // Update status bar with next instruction
@@ -2641,10 +2696,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     
                     // Check the actual state of the checkbox directly
                     BOOL isChecked = (SendMessage(g_hFillCheckbox, BM_GETCHECK, 0, 0) == BST_CHECKED);
-                    g_isFilled = (isChecked == TRUE);
+                    bool shouldFill = (isChecked == TRUE);
                     
                     // If fill is enabled, fill the polygon
-                    if (g_isFilled) {
+                    if (shouldFill) {
                         // Use the selected fill method
                         switch(g_polyFillMethod) {
                             case 0: // Convex Fill
