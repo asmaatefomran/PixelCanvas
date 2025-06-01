@@ -182,6 +182,7 @@ bool g_isFilled = false;  // Initialize to false to respect user choice
 int g_lineThickness = 1;
 int g_selectedQuarter = ID_QUARTER_FULL; // Default to fill the whole circle
 int g_polyFillMethod = 0; // 0 = convex, 1 = non-convex (general), 2 = flood fill
+bool g_polyFillEnabled = false; // Separate flag for polygon fill state
 bool g_isDrawing = false;
 POINT g_startPoint = {0, 0};
 POINT g_endPoint = {0, 0};
@@ -1573,6 +1574,9 @@ void HandleShapeSelection() {
     // Reset polygon points if needed
     if (g_currentTool != ID_TOOL_POLYGON) {
         g_polygonPoints.clear();
+    } else {
+        // When switching to polygon tool, update checkbox to match polygon-specific state
+        SendMessage(g_hFillCheckbox, BM_SETCHECK, g_polyFillEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
     }
     
     // Reset ellipse click counter and drawing mode if changing from ellipse
@@ -1773,8 +1777,12 @@ void UpdateControlsFromSelection() {
     }
     SendMessage(g_hAlgorithmCombo, CB_SETCURSEL, algoIndex, 0);
     
-    // Update fill checkbox
-    SendMessage(g_hFillCheckbox, BM_SETCHECK, g_isFilled ? BST_CHECKED : BST_UNCHECKED, 0);
+    // Update fill checkbox - use polygon-specific state if in polygon tool
+    if (g_currentTool == ID_TOOL_POLYGON) {
+        SendMessage(g_hFillCheckbox, BM_SETCHECK, g_polyFillEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
+    } else {
+        SendMessage(g_hFillCheckbox, BM_SETCHECK, g_isFilled ? BST_CHECKED : BST_UNCHECKED, 0);
+    }
     
     // Update the thickness slider
     SendMessage(g_hThicknessSlider, TBM_SETPOS, TRUE, g_lineThickness);
@@ -2101,14 +2109,18 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         // Get the current state of the checkbox after clicking
                         BOOL isChecked = (SendMessage(g_hFillCheckbox, BM_GETCHECK, 0, 0) == BST_CHECKED);
                         
-                        // Update the g_isFilled flag
-                        g_isFilled = (isChecked == TRUE);
+                        // Update the appropriate fill flag based on the current tool
+                        if (g_currentTool == ID_TOOL_POLYGON) {
+                            g_polyFillEnabled = (isChecked == TRUE);
+                        } else {
+                            g_isFilled = (isChecked == TRUE);
+                        }
                         
                         // Update status bar with clear message
                         wchar_t statusText[256];
                         _snwprintf(statusText, 256, L"Fill option %s - shapes will %sbe filled", 
-                                 g_isFilled ? L"enabled" : L"disabled",
-                                 g_isFilled ? L"" : L"not ");
+                                 isChecked ? L"enabled" : L"disabled",
+                                 isChecked ? L"" : L"not ");
                         UpdateStatusBar(statusText);
                         return 0;
                     }
@@ -2251,18 +2263,15 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         // Make sure polygon fill options are visible
                         UpdateControlVisibility();
                         
-                        // Check the actual state of the checkbox directly - don't rely on g_isFilled
+                        // Check the actual state of the checkbox directly - use our polygon-specific variable
                         BOOL isChecked = (SendMessage(g_hFillCheckbox, BM_GETCHECK, 0, 0) == BST_CHECKED);
-                        
-                        // Save current g_isFilled state
-                        bool savedFillState = g_isFilled;
+                        g_polyFillEnabled = (isChecked == TRUE);
                         
                         // Add point to polygon
                         POINT pt = {x, y};
                         g_polygonPoints.push_back(pt);
                         
                         // Draw a small point to mark the vertex - ALWAYS filled regardless of checkbox state
-                        // This avoids modifying g_isFilled
                         HBRUSH hBrush = CreateSolidBrush(g_currentColor);
                         HBRUSH hOldBrush = (HBRUSH)SelectObject(g_hdcMem, hBrush);
                         HPEN hPen = CreatePen(PS_SOLID, 1, g_currentColor);
@@ -2276,9 +2285,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         SelectObject(g_hdcMem, hOldPen);
                         DeleteObject(hBrush);
                         DeleteObject(hPen);
-                        
-                        // Update g_isFilled with the actual checkbox state to keep them in sync
-                        g_isFilled = (isChecked == TRUE);
                         
                         // If there are at least 2 points, draw a line between the last two
                         if (g_polygonPoints.size() >= 2) {
@@ -2694,9 +2700,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     POINT last = g_polygonPoints[g_polygonPoints.size() - 1];
                     DrawLine(g_hdcMem, last.x, last.y, first.x, first.y, g_currentColor, g_lineThickness);
                     
-                    // Check the actual state of the checkbox directly
-                    BOOL isChecked = (SendMessage(g_hFillCheckbox, BM_GETCHECK, 0, 0) == BST_CHECKED);
-                    bool shouldFill = (isChecked == TRUE);
+                    // Use the polygon-specific fill flag
+                    bool shouldFill = g_polyFillEnabled;
                     
                     // If fill is enabled, fill the polygon
                     if (shouldFill) {
