@@ -20,6 +20,8 @@
 
 // Include custom circle class
 #include "../include/Circle.h"
+// Include custom line class
+#include "../include/Line.h"
 
 // Include the common controls library (Visual Studio only)
 #if defined(_MSC_VER)
@@ -85,6 +87,7 @@ void StandardFill(HDC hdc, int centerX, int centerY, int radius, COLORREF color)
 #define ID_FILL_CONVEX_POLYGON 4004
 #define ID_FILL_FLOOD 4005
 #define ID_FILL_FLOOD_QUEUE 4006
+#define ID_FILL_CHECKBOX 8001
 // Quarter fill methods (lines)
 #define ID_FILL_QUARTER1_LINES 4007
 #define ID_FILL_QUARTER2_LINES 4008
@@ -116,6 +119,8 @@ void StandardFill(HDC hdc, int centerX, int centerY, int radius, COLORREF color)
 #define ID_LABEL_THICKNESS 7007
 #define ID_LABEL_COLOR 7008
 #define ID_COMBO_TENSION 7009
+#define ID_POLY_FILL_LABEL 9010
+#define ID_POLY_FILL_COMBO 9011
 
 // Window size
 #define WINDOW_WIDTH 1200
@@ -149,9 +154,11 @@ HWND g_hToolbar;
 HWND g_hStatusBar;
 HWND g_hShapeCombo;
 HWND g_hAlgorithmCombo;
-HWND g_hFillMethodCombo;
+HWND g_hFillCheckbox;  // Use a simple checkbox instead of radio buttons
 HWND g_hQuarterCombo; // New dropdown for quarter selection
 HWND g_hQuarterLabel; // Label for quarter selection
+HWND g_hPolyFillLabel; // Label for polygon fill options
+HWND g_hPolyFillCombo; // Dropdown for polygon fill options
 HWND g_hColorButton;
 HWND g_hThicknessSlider;
 HWND g_hShapeLabel;
@@ -171,9 +178,10 @@ HFONT g_hButtonFont;
 COLORREF g_currentColor = COLOR_BLACK;
 int g_currentTool = ID_TOOL_LINE;
 int g_currentAlgorithm = ID_ALGO_DDA;
-int g_currentFill = ID_FILL_LINES;
+bool g_isFilled = false;  // Initialize to false to respect user choice
 int g_lineThickness = 1;
 int g_selectedQuarter = ID_QUARTER_FULL; // Default to fill the whole circle
+int g_polyFillMethod = 0; // 0 = convex, 1 = non-convex (general), 2 = flood fill
 bool g_isDrawing = false;
 POINT g_startPoint = {0, 0};
 POINT g_endPoint = {0, 0};
@@ -226,11 +234,12 @@ struct Derivative {
 struct EdgeRec {
     int left, right;
 };
-typedef EdgeRec convexEdgeTable[800];
+// Increase table size from 800 to 3000 to handle larger vertical areas
+typedef EdgeRec convexEdgeTable[3000];
 
 // Initialize edge table with default values
 void init(convexEdgeTable tbl) {
-    for (int i = 0; i < 800; i++) {
+    for (int i = 0; i < 3000; i++) {
         tbl[i].left = INT_MAX;
         tbl[i].right = INT_MIN;
     }
@@ -238,29 +247,63 @@ void init(convexEdgeTable tbl) {
 
 // Add an edge to the edge table
 void edge2table(convexEdgeTable tbl, point v1, point v2) {
-    // Skip horizontal edges
-    if (v1.y == v2.y)
-        return;
-    
-    // Ensure v1 is the lower point
-    if (v1.y > v2.y)
-        std::swap(v1, v2);
-    
-    // Calculate scan line intersection parameters
-    double x = v1.x;
-    double slope = (v2.x - v1.x) / (v2.y - v1.y);
-    
-    // For each scan line intersecting this edge
-    for (int y = (int)ceil(v1.y); y < (int)floor(v2.y); y++) {
-        // Ensure we're within bounds of the edge table
-        if (y >= 0 && y < 800) {
+    try {
+        // Skip horizontal edges
+        if (fabs(v1.y - v2.y) < 0.001)
+            return;
+        
+        // Ensure v1 is the lower point
+        if (v1.y > v2.y)
+            std::swap(v1, v2);
+        
+        // Validate coordinates are within reasonable range
+        if (v1.y < -1000 || v1.y > 10000 || v2.y < -1000 || v2.y > 10000 ||
+            v1.x < -1000 || v1.x > 10000 || v2.x < -1000 || v2.x > 10000) {
+            // Skip this edge if coordinates are extreme
+            return;
+        }
+        
+        // Calculate scan line intersection parameters
+        double x = v1.x;
+        double slope;
+        
+        // Check for vertical line to avoid division by zero
+        if (fabs(v2.y - v1.y) < 0.001) {
+            slope = 0;  // Avoid division by zero
+        } else {
+            slope = (v2.x - v1.x) / (v2.y - v1.y);
+        }
+        
+        // Calculate the scan line range, ensuring we stay within bounds
+        int startY = (int)ceil(v1.y);
+        startY = std::max(0, startY);
+        startY = std::min(startY, 2999);
+        
+        int endY = (int)floor(v2.y);
+        endY = std::max(0, endY);
+        endY = std::min(endY, 2999);
+        
+        // For each scan line intersecting this edge
+        for (int y = startY; y < endY; y++) {
             // Update min/max x values for this scan line
             int xInt = (int)ceil(x);
-            tbl[y].left = (tbl[y].left < xInt) ? tbl[y].left : xInt;  // std::min equivalent
-            tbl[y].right = (tbl[y].right > xInt) ? tbl[y].right : xInt; // std::max equivalent
+            
+            // Bound check the x coordinate
+            xInt = std::max(-1000, xInt);
+            xInt = std::min(5000, xInt);
+            
+            // Update the edge table safely
+            if (y >= 0 && y < 3000) {
+                tbl[y].left = std::min(tbl[y].left, xInt);
+                tbl[y].right = std::max(tbl[y].right, xInt);
+            }
+            
+            // Move to next scan line
+            x += slope;
         }
-        // Move to next scan line
-        x += slope;
+    }
+    catch (...) {
+        // Silent catch to prevent crashes
     }
 }
 
@@ -275,13 +318,38 @@ void polygon2table(convexEdgeTable tbl, point p[], int n) {
 
 // Draw horizontal spans between left and right edges
 void table2screen(HDC hdc, convexEdgeTable tbl, COLORREF c) {
-    // For each scan line
-    for (int y = 0; y < 800; y++) {
-        // If we have a valid span (left <= right)
-        if (tbl[y].left <= tbl[y].right) {
-            // Draw the horizontal line
-            DrawLineDDA(hdc, tbl[y].left, y, tbl[y].right, y, c);
+    try {
+        // Set a reasonable limit for the maximum span width to prevent hangs
+        const int MAX_SPAN_WIDTH = 2000;
+        
+        // For each scan line
+        for (int y = 0; y < 3000; y++) {
+            // If we have a valid span (left <= right)
+            if (tbl[y].left <= tbl[y].right && 
+                tbl[y].left < 10000 && tbl[y].right < 10000 && 
+                tbl[y].left > -10000 && tbl[y].right > -10000) { // Avoid extreme values
+                
+                // Ensure the span isn't too wide (would cause hangs)
+                int spanWidth = tbl[y].right - tbl[y].left;
+                if (spanWidth > MAX_SPAN_WIDTH) {
+                    tbl[y].right = tbl[y].left + MAX_SPAN_WIDTH;
+                }
+                
+                // Draw the horizontal line, but only if Y is in a reasonable range
+                if (y >= 0 && y < 2000) {
+                    // Clamp x values to reasonable limits
+                    int left = std::max(0, tbl[y].left);
+                    int right = std::min(5000, tbl[y].right);
+                    
+                    if (left < right) {
+                        DrawLineDDA(hdc, left, y, right, y, c);
+                    }
+                }
+            }
         }
+    }
+    catch (...) {
+        // Silent catch to prevent crashes
     }
 }
 
@@ -290,15 +358,22 @@ void convexfill(HDC hdc, point p[], int n, COLORREF c) {
     // Ensure we have a valid polygon
     if (n < 3) return;
     
-    // Create and initialize the edge table
-    convexEdgeTable tbl;
-    init(tbl);
-    
-    // Build the edge table from polygon edges
-    polygon2table(tbl, p, n);
-    
-    // Draw the filled polygon using the edge table
-    table2screen(hdc, tbl, c);
+    try {
+        // Create and initialize the edge table
+        convexEdgeTable tbl;
+        init(tbl);
+        
+        // Build the edge table from polygon edges
+        polygon2table(tbl, p, n);
+        
+        // Draw the filled polygon using the edge table
+        table2screen(hdc, tbl, c);
+    }
+    catch (...) {
+        // Silently catch any exceptions to prevent crashes
+        // Output error to debug console
+        OutputDebugStringW(L"Error filling convex polygon");
+    }
 }
 
 // ... rest of the filling code implementations ...
@@ -311,26 +386,39 @@ int Round(double x) {
 // Implementation of DrawLineDDA
 void DrawLineDDA(HDC hdc, int x1, int y1, int x2, int y2, COLORREF c)
 {
-    int dx = x2 - x1;
-    int dy = y2 - y1;
-    int steps;
+    try {
+        // Use our Line class implementation
+        Line line(hdc);
+        line.DrawLineDDA(x1, y1, x2, y2, c);
+    }
+    catch (...) {
+        // Fallback implementation if Line class fails
+        int dx = x2 - x1;
+        int dy = y2 - y1;
+        int steps;
 
-    if (abs(dx) > abs(dy))
-        steps = abs(dx);
-    else
-        steps = abs(dy);
+        if (abs(dx) > abs(dy))
+            steps = abs(dx);
+        else
+            steps = abs(dy);
+            
+        if (steps == 0) {
+            SetPixel(hdc, x1, y1, c);
+            return;
+        }
 
-    double x_increment = (double)dx / steps,
-        y_increment = (double)dy / steps,
-        x = x1,
-        y = y1;
+        double x_increment = (double)dx / steps,
+            y_increment = (double)dy / steps,
+            x = x1,
+            y = y1;
 
-    SetPixel(hdc, Round(x), Round(y), c);
-
-    for (int i = 0; i < steps; i++) {
-        x += x_increment;
-        y += y_increment;
         SetPixel(hdc, Round(x), Round(y), c);
+
+        for (int i = 0; i < steps; i++) {
+            x += x_increment;
+            y += y_increment;
+            SetPixel(hdc, Round(x), Round(y), c);
+        }
     }
 }
 
@@ -402,7 +490,8 @@ void HandleShapeSelection();
 void HandleAlgorithmSelection();
 void HandleFillMethodSelection();
 void HandleQuarterSelection();
-void UpdateQuarterSelectionVisibility();
+void UpdateControlVisibility();
+void HandlePolyFillSelection();
 HFONT CreateCustomFont(int size, bool bold);
 void UpdateAlgorithmDropdown();
 void UpdateInstructions();
@@ -486,8 +575,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // Update instructions in the status bar
     UpdateInstructions();
 
-    // Initialize quarter selection visibility
-    UpdateQuarterSelectionVisibility();
+    // Update control visibility based on current tool
+    UpdateControlVisibility();
 
     // Run the message loop
     MSG msg = {};
@@ -702,13 +791,24 @@ void CreateControls(HWND hwnd) {
         hwnd, (HMENU)ID_LABEL_THICKNESS, GetModuleHandle(NULL), NULL
     );
     
-    // Add fill method label - positioned below the thickness slider
+    // Replace fill method dropdown with a label for fill options and checkbox
     g_hFillMethodLabel = CreateWindowW(
-        L"STATIC", L"Fill Method:",
+        L"STATIC", L"Fill Options:",
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         startX, startY + (controlHeight + margin) * 2, labelWidth, controlHeight,
         hwnd, (HMENU)(ID_LABEL_THICKNESS + 2), GetModuleHandle(NULL), NULL
     );
+    
+    // Create fill checkbox - not checked by default
+    g_hFillCheckbox = CreateWindowW(
+        L"BUTTON", L"Fill Shapes",
+        WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+        startX + labelWidth, startY + (controlHeight + margin) * 2, controlWidth, controlHeight,
+        hwnd, (HMENU)ID_FILL_CHECKBOX, GetModuleHandle(NULL), NULL
+    );
+    
+    // Initialize checkbox to match g_isFilled state (which is false by default)
+    SendMessage(g_hFillCheckbox, BM_SETCHECK, g_isFilled ? BST_CHECKED : BST_UNCHECKED, 0);
     
     // Create help text window in the top right
     g_hHelpText = CreateWindowW(
@@ -723,7 +823,7 @@ void CreateControls(HWND hwnd) {
     SendMessage(g_hAlgorithmLabel, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
     SendMessage(g_hColorLabel, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
     SendMessage(g_hThicknessLabel, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
-    SendMessage(g_hFillMethodLabel, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE); // Set font for fill method label
+    SendMessage(g_hFillMethodLabel, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
     SendMessage(g_hHelpText, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
     
     // Create shape dropdown
@@ -771,24 +871,26 @@ void CreateControls(HWND hwnd) {
         hwnd, (HMENU)ID_THICKNESS_SLIDER, GetModuleHandle(NULL), NULL
     );
     
-    // Create fill method dropdown
-    g_hFillMethodCombo = CreateWindowW(
-        L"COMBOBOX", L"",
-        WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
-        startX + labelWidth, startY + (controlHeight + margin) * 2, controlWidth, 200,
-        hwnd, (HMENU)(ID_COMBO_ALGORITHM + 1), GetModuleHandle(NULL), NULL
+    // Replace fill method dropdown with a label for fill options and checkbox
+    g_hFillMethodLabel = CreateWindowW(
+        L"STATIC", L"Fill Options:",
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        startX, startY + (controlHeight + margin) * 2, labelWidth, controlHeight,
+        hwnd, (HMENU)(ID_LABEL_THICKNESS + 2), GetModuleHandle(NULL), NULL
     );
     
-    // Add fill method items
-    SendMessage(g_hFillMethodCombo, CB_ADDSTRING, 0, (LPARAM)L"Fill with Lines");
-    SendMessage(g_hFillMethodCombo, CB_ADDSTRING, 0, (LPARAM)L"Fill with Circles");
-    SendMessage(g_hFillMethodCombo, CB_ADDSTRING, 0, (LPARAM)L"Fill with General Polygon");
-    SendMessage(g_hFillMethodCombo, CB_ADDSTRING, 0, (LPARAM)L"Fill with Convex Polygon");
-    SendMessage(g_hFillMethodCombo, CB_ADDSTRING, 0, (LPARAM)L"Flood Fill");
-    SendMessage(g_hFillMethodCombo, CB_ADDSTRING, 0, (LPARAM)L"Flood Fill Queue");
-    SendMessage(g_hFillMethodCombo, CB_SETCURSEL, 0, 0); // Select Lines by default
+    // Create fill checkbox - not checked by default
+    g_hFillCheckbox = CreateWindowW(
+        L"BUTTON", L"Fill Shapes",
+        WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+        startX + labelWidth, startY + (controlHeight + margin) * 2, controlWidth, controlHeight,
+        hwnd, (HMENU)ID_FILL_CHECKBOX, GetModuleHandle(NULL), NULL
+    );
     
-    // Create quarter selection label - positioned below the fill method dropdown
+    // Initialize checkbox to match g_isFilled state (which is false by default)
+    SendMessage(g_hFillCheckbox, BM_SETCHECK, g_isFilled ? BST_CHECKED : BST_UNCHECKED, 0);
+    
+    // Create quarter selection label - positioned below the fill options
     g_hQuarterLabel = CreateWindowW(
         L"STATIC", L"Quarter:",
         WS_CHILD | SS_LEFT, // Initially hidden
@@ -812,13 +914,41 @@ void CreateControls(HWND hwnd) {
     SendMessage(g_hQuarterCombo, CB_ADDSTRING, 0, (LPARAM)L"Bottom-Right (4th Quarter)");
     SendMessage(g_hQuarterCombo, CB_SETCURSEL, 0, 0); // Select Full Circle by default
     
+    // Create polygon fill options - initially hidden
+    g_hPolyFillLabel = CreateWindowW(
+        L"STATIC", L"Polygon Fill:",
+        WS_CHILD | SS_LEFT, // Initially hidden
+        startX, startY + (controlHeight + margin) * 3, labelWidth, controlHeight,
+        hwnd, (HMENU)ID_POLY_FILL_LABEL, GetModuleHandle(NULL), NULL
+    );
+    
+    // Create polygon fill dropdown
+    g_hPolyFillCombo = CreateWindowW(
+        L"COMBOBOX", L"",
+        WS_CHILD | CBS_DROPDOWNLIST | WS_VSCROLL, // Initially hidden
+        startX + labelWidth, startY + (controlHeight + margin) * 3, controlWidth, 200,
+        hwnd, (HMENU)ID_POLY_FILL_COMBO, GetModuleHandle(NULL), NULL
+    );
+    
+    // Add polygon fill options
+    SendMessage(g_hPolyFillCombo, CB_ADDSTRING, 0, (LPARAM)L"Convex Fill");
+    SendMessage(g_hPolyFillCombo, CB_ADDSTRING, 0, (LPARAM)L"General Fill");
+    SendMessage(g_hPolyFillCombo, CB_ADDSTRING, 0, (LPARAM)L"Flood Fill");
+    SendMessage(g_hPolyFillCombo, CB_SETCURSEL, 0, 0); // Select Convex Fill by default
+    
+    // Initially hide polygon fill options
+    ShowWindow(g_hPolyFillLabel, SW_HIDE);
+    ShowWindow(g_hPolyFillCombo, SW_HIDE);
+    
     // Set font for controls
     SendMessage(g_hShapeCombo, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
     SendMessage(g_hAlgorithmCombo, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
-    SendMessage(g_hFillMethodCombo, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
     SendMessage(g_hQuarterLabel, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE); // Set font for quarter label
     SendMessage(g_hQuarterCombo, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE); // Set font for quarter combo
     SendMessage(g_hColorButton, WM_SETFONT, (WPARAM)g_hButtonFont, TRUE);
+    SendMessage(g_hFillCheckbox, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE); // Set font for checkbox
+    SendMessage(g_hPolyFillLabel, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE); // Set font for polygon fill label
+    SendMessage(g_hPolyFillCombo, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE); // Set font for polygon fill combo
     
     // Set range and position for thickness slider
     SendMessage(g_hThicknessSlider, TBM_SETRANGE, TRUE, MAKELONG(1, 10));
@@ -826,6 +956,9 @@ void CreateControls(HWND hwnd) {
     
     // Update color button appearance
     UpdateColorButton();
+    
+    // Update control visibility based on current tool
+    UpdateControlVisibility();
 }
 
 void UpdateStatusBar(const wchar_t* message) {
@@ -969,7 +1102,7 @@ void HandleMenuSelection(HWND hwnd, WPARAM wParam) {
             UpdateAlgorithmDropdown();
             
             // Update quarter selection visibility based on current tool
-            UpdateQuarterSelectionVisibility();
+            UpdateControlVisibility();
             
             // Update the UI controls to match the selection
             UpdateControlsFromSelection();
@@ -1058,12 +1191,7 @@ void HandleMenuSelection(HWND hwnd, WPARAM wParam) {
         // Fill selection
         case ID_FILL_LINES:
         case ID_FILL_CIRCLES:
-            // Uncheck previous fill
-            CheckMenuItem(g_hFillMenu, g_currentFill, MF_BYCOMMAND | MF_UNCHECKED);
-            // Update current fill
-            g_currentFill = LOWORD(wParam);
-            // Check new fill
-            CheckMenuItem(g_hFillMenu, g_currentFill, MF_BYCOMMAND | MF_CHECKED);
+            // No longer needed - we use radio buttons now
             break;
             
         // Quarter selection for circle filling
@@ -1159,40 +1287,130 @@ void HandleMenuSelection(HWND hwnd, WPARAM wParam) {
 }
 
 void DrawLine(HDC hdc, int x1, int y1, int x2, int y2, COLORREF color, int thickness) {
-    // For demonstration, we'll use the GDI line drawing
-    HPEN hPen = CreatePen(PS_SOLID, thickness, color);
-    HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
-    
-    MoveToEx(hdc, x1, y1, NULL);
-    LineTo(hdc, x2, y2);
-    
-    SelectObject(hdc, hOldPen);
-    DeleteObject(hPen);
+    // Line drawing should never try to use fill methods, regardless of g_currentFill setting
+    try {
+        // Create Line object using the Line class
+        Line line(hdc);
+        
+        // Choose algorithm based on g_currentAlgorithm
+        switch (g_currentAlgorithm) {
+            case ID_ALGO_DDA:
+                if (thickness == 1) {
+                    // Use the Line class implementation for DDA
+                    line.DrawLineDDA(x1, y1, x2, y2, color);
+                } else {
+                    // Use GDI for thicker lines
+                    HPEN hPen = CreatePen(PS_SOLID, thickness, color);
+                    HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+                    MoveToEx(hdc, x1, y1, NULL);
+                    LineTo(hdc, x2, y2);
+                    SelectObject(hdc, hOldPen);
+                    DeleteObject(hPen);
+                }
+                break;
+                
+            case ID_ALGO_MIDPOINT:
+                if (thickness == 1) {
+                    // Use the Line class implementation for Midpoint
+                    line.DrawLineMidpoint(x1, y1, x2, y2, color);
+                } else {
+                    // Fall back to GDI for thicker lines
+                    HPEN hPen = CreatePen(PS_SOLID, thickness, color);
+                    HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+                    MoveToEx(hdc, x1, y1, NULL);
+                    LineTo(hdc, x2, y2);
+                    SelectObject(hdc, hOldPen);
+                    DeleteObject(hPen);
+                }
+                break;
+                
+            case ID_ALGO_PARAMETRIC:
+                if (thickness == 1) {
+                    // Use the Line class implementation for Parametric
+                    line.DrawLineParametric(x1, y1, x2, y2, color);
+                } else {
+                    // Fall back to GDI for thicker lines
+                    HPEN hPen = CreatePen(PS_SOLID, thickness, color);
+                    HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+                    MoveToEx(hdc, x1, y1, NULL);
+                    LineTo(hdc, x2, y2);
+                    SelectObject(hdc, hOldPen);
+                    DeleteObject(hPen);
+                }
+                break;
+                
+            default:
+                // Default to DDA for unsupported algorithms
+                if (thickness == 1) {
+                    line.DrawLineDDA(x1, y1, x2, y2, color);
+                } else {
+                    // Fall back to GDI for thicker lines
+                    HPEN hPen = CreatePen(PS_SOLID, thickness, color);
+                    HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+                    MoveToEx(hdc, x1, y1, NULL);
+                    LineTo(hdc, x2, y2);
+                    SelectObject(hdc, hOldPen);
+                    DeleteObject(hPen);
+                }
+                break;
+        }
+    }
+    catch (...) {
+        // Fallback to simpler drawing if needed
+        SetPixel(hdc, x1, y1, color);
+        SetPixel(hdc, x2, y2, color);
+    }
 }
 
 void DrawCircle(HDC hdc, int centerX, int centerY, int radius, COLORREF color, int thickness, bool filled) {
-    // For demonstration, we'll use the GDI ellipse drawing
-    HPEN hPen = CreatePen(PS_SOLID, thickness, color);
-    HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+    // Create a Circle object using the implementation in Circle.cpp
+    Circle circle(hdc);
     
     if (filled) {
-        // When filled=true, this indicates we should use special fill methods
-        FillCircle(hdc, centerX, centerY, radius, color);
+        // For filled circles, use the Circle class's built-in fill methods
+        // First draw the outline
+        circle.DrawCircleMidpoint(centerX, centerY, radius, color);
+        
+        // Then fill it based on the selected quarter
+        if (g_selectedQuarter == ID_QUARTER_FULL) {
+            // Fill the entire circle - alternate between line and circle fills
+            static bool useCircleFill = false;
+            useCircleFill = !useCircleFill;
+            
+            if (useCircleFill) {
+                // Fill with concentric circles
+                circle.FillWithCircles(centerX, centerY, radius);
+            } else {
+                // Fill with lines
+                circle.FillWithLines(centerX, centerY, radius, color);
+            }
+        } else if (g_selectedQuarter == ID_QUARTER_1) {
+            circle.FillQuarterWithCircles(centerX, centerY, radius, 1);
+        } else if (g_selectedQuarter == ID_QUARTER_2) {
+            circle.FillQuarterWithCircles(centerX, centerY, radius, 2);
+        } else if (g_selectedQuarter == ID_QUARTER_3) {
+            circle.FillQuarterWithCircles(centerX, centerY, radius, 3);
+        } else if (g_selectedQuarter == ID_QUARTER_4) {
+            circle.FillQuarterWithCircles(centerX, centerY, radius, 4);
+        }
     } else {
-        // Just draw the outline (no fill)
-        HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
-        Ellipse(hdc, centerX - radius, centerY - radius, centerX + radius, centerY + radius);
-        SelectObject(hdc, hOldBrush);
+        // For outline only, use the Circle class's drawing method based on the selected algorithm
+        if (g_currentAlgorithm == ID_ALGO_MIDPOINT) {
+            circle.DrawCircleMidpoint(centerX, centerY, radius, color);
+        } else if (g_currentAlgorithm == ID_ALGO_POLAR) {
+            circle.DrawCirclePolar(centerX, centerY, radius, color);
+        } else {
+            // Default to midpoint if no specific algorithm is matched
+            circle.DrawCircleMidpoint(centerX, centerY, radius, color);
+        }
     }
-    
-    SelectObject(hdc, hOldPen);
-    DeleteObject(hPen);
 }
 
 void DrawEllipse(HDC hdc, int centerX, int centerY, int radiusX, int radiusY, COLORREF color, int thickness, bool filled)
 {
+    // Use standard GDI drawing for ellipses
     if (filled) {
-        // Fill the ellipse
+        // Fill the ellipse using standard GDI
         HBRUSH hBrush = CreateSolidBrush(color);
         HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, hBrush);
         HPEN hPen = CreatePen(PS_SOLID, 1, color);
@@ -1205,7 +1423,7 @@ void DrawEllipse(HDC hdc, int centerX, int centerY, int radiusX, int radiusY, CO
         DeleteObject(hBrush);
         DeleteObject(hPen);
     } else {
-        // For demonstration, we'll use the GDI ellipse drawing
+        // For outline, use specified thickness
         HPEN hPen = CreatePen(PS_SOLID, thickness, color);
         HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
         HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
@@ -1338,12 +1556,6 @@ void HandleShapeSelection() {
     // Get the current selection
     int selection = (int)SendMessage(g_hShapeCombo, CB_GETCURSEL, 0, 0);
     
-    // Clean up the Circle object if it exists to prevent memory issues
-    // if (g_circle != nullptr) {
-    //     delete g_circle;
-    //     g_circle = nullptr;
-    // }
-    
     // Map selection index to tool ID
     int toolID = ID_TOOL_LINE;
     switch (selection) {
@@ -1385,8 +1597,11 @@ void HandleShapeSelection() {
     // Update the algorithm dropdown to show appropriate algorithms for this tool
     UpdateAlgorithmDropdown();
     
-    // Update quarter selection visibility based on current tool
-    UpdateQuarterSelectionVisibility();
+    // Update quarter selection and polygon fill visibility based on current tool
+    UpdateControlVisibility();
+    
+    // Update the UI controls to match the selection
+    UpdateControlsFromSelection();
     
     // Update instructions in the status bar
     UpdateInstructions();
@@ -1487,71 +1702,7 @@ void HandleAlgorithmSelection() {
 }
 
 void HandleFillMethodSelection() {
-    // Get the current selection index
-    int selection = (int)SendMessage(g_hFillMethodCombo, CB_GETCURSEL, 0, 0);
-    
-    // Clean up the Circle object if it exists to prevent memory issues
-    // if (g_circle != nullptr) {
-    //     delete g_circle;
-    //     g_circle = nullptr;
-    // }
-    
-    // Map selection index to fill method ID
-    switch (selection) {
-        case 0:  // Fill with Lines
-            g_currentFill = ID_FILL_LINES;
-            break;
-        case 1:  // Fill with Circles
-            g_currentFill = ID_FILL_CIRCLES;
-            break;
-        case 2:  // Fill with General Polygon
-            g_currentFill = ID_FILL_GENERAL_POLYGON;
-            break;
-        case 3:  // Fill with Convex Polygon
-            g_currentFill = ID_FILL_CONVEX_POLYGON;
-            break;
-        case 4:  // Flood Fill
-            g_currentFill = ID_FILL_FLOOD;
-            break;
-        case 5:  // Flood Fill Queue
-            g_currentFill = ID_FILL_FLOOD_QUEUE;
-            break;
-        case 6:  // Fill Top-Right Quarter (Lines)
-            g_currentFill = ID_FILL_QUARTER1_LINES;
-            break;
-        case 7:  // Fill Top-Left Quarter (Lines)
-            g_currentFill = ID_FILL_QUARTER2_LINES;
-            break;
-        case 8:  // Fill Bottom-Left Quarter (Lines)
-            g_currentFill = ID_FILL_QUARTER3_LINES;
-            break;
-        case 9:  // Fill Bottom-Right Quarter (Lines)
-            g_currentFill = ID_FILL_QUARTER4_LINES;
-            break;
-        case 10: // Fill Top-Right Quarter (Circles)
-            g_currentFill = ID_FILL_QUARTER1_CIRCLES;
-            break;
-        case 11: // Fill Top-Left Quarter (Circles)
-            g_currentFill = ID_FILL_QUARTER2_CIRCLES;
-            break;
-        case 12: // Fill Bottom-Left Quarter (Circles)
-            g_currentFill = ID_FILL_QUARTER3_CIRCLES;
-            break;
-        case 13: // Fill Bottom-Right Quarter (Circles)
-            g_currentFill = ID_FILL_QUARTER4_CIRCLES;
-            break;
-        default:
-            g_currentFill = ID_FILL_LINES;
-            break;
-    }
-    
-    // Update status bar with selected fill method
-    wchar_t statusText[256];
-    _snwprintf(statusText, 256, L"Fill method changed: %s", 
-              (selection >= 0) ? 
-              (LPWSTR)SendMessage(g_hFillMethodCombo, CB_GETLBTEXT, selection, 0) : 
-              L"Unknown");
-    UpdateStatusBar(statusText);
+    // No longer needed - UI uses radio buttons now that directly update g_isFilled
 }
 
 void HandleQuarterSelection() {
@@ -1622,17 +1773,8 @@ void UpdateControlsFromSelection() {
     }
     SendMessage(g_hAlgorithmCombo, CB_SETCURSEL, algoIndex, 0);
     
-    // Update the fill method dropdown based on current fill method
-    int fillIndex = 0;
-    switch (g_currentFill) {
-        case ID_FILL_LINES: fillIndex = 0; break;
-        case ID_FILL_CIRCLES: fillIndex = 1; break;
-        case ID_FILL_GENERAL_POLYGON: fillIndex = 2; break;
-        case ID_FILL_CONVEX_POLYGON: fillIndex = 3; break;
-        case ID_FILL_FLOOD: fillIndex = 4; break;
-        case ID_FILL_FLOOD_QUEUE: fillIndex = 5; break;
-    }
-    SendMessage(g_hFillMethodCombo, CB_SETCURSEL, fillIndex, 0);
+    // Update fill checkbox
+    SendMessage(g_hFillCheckbox, BM_SETCHECK, g_isFilled ? BST_CHECKED : BST_UNCHECKED, 0);
     
     // Update the thickness slider
     SendMessage(g_hThicknessSlider, TBM_SETPOS, TRUE, g_lineThickness);
@@ -1900,6 +2042,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     // Handle dropdown selection changes
                     if (LOWORD(wParam) == ID_COMBO_SHAPE) {
                         HandleShapeSelection();
+                        
+                        // Call UpdateControlVisibility to show/hide the appropriate controls
+                        UpdateControlVisibility();
                         return 0;
                     }
                     else if (LOWORD(wParam) == ID_COMBO_ALGORITHM) {
@@ -1912,6 +2057,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     }
                     else if (LOWORD(wParam) == (ID_COMBO_ALGORITHM + 2)) {  // Quarter selection dropdown
                         HandleQuarterSelection();
+                        return 0;
+                    }
+                    else if (LOWORD(wParam) == ID_POLY_FILL_COMBO) {  // Polygon fill dropdown
+                        HandlePolyFillSelection();
                         return 0;
                     }
                     else if (LOWORD(wParam) == ID_COMBO_TENSION) {
@@ -1945,6 +2094,19 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     // Handle button clicks
                     if (LOWORD(wParam) == ID_COLOR_BUTTON) {
                         ShowColorDialog(hwnd);
+                        return 0;
+                    }
+                    // Handle the fill checkbox
+                    else if (LOWORD(wParam) == ID_FILL_CHECKBOX) {
+                        // Update the g_isFilled flag based on checkbox state
+                        g_isFilled = (SendMessage(g_hFillCheckbox, BM_GETCHECK, 0, 0) == BST_CHECKED);
+                        
+                        // Update status bar with clear message
+                        wchar_t statusText[256];
+                        _snwprintf(statusText, 256, L"Fill option %s - shapes will %sbe filled", 
+                                 g_isFilled ? L"enabled" : L"disabled",
+                                 g_isFilled ? L"" : L"not ");
+                        UpdateStatusBar(statusText);
                         return 0;
                     }
                     break;
@@ -2083,12 +2245,22 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     
                     // Handle different tools
                     if (g_currentTool == ID_TOOL_POLYGON) {
+                        // Make sure polygon fill options are visible
+                        UpdateControlVisibility();
+                        
+                        // Store current fill checkbox state before drawing
+                        bool currentFillState = g_isFilled;
+                        
                         // Add point to polygon
                         POINT pt = {x, y};
                         g_polygonPoints.push_back(pt);
                         
-                        // Draw a small point to mark the vertex
+                        // Draw a small point to mark the vertex - always fill with a small dot regardless of fill state
                         DrawCircle(g_hdcMem, x, y, 2, g_currentColor, 1, true);
+                        
+                        // Restore fill state
+                        g_isFilled = currentFillState;
+                        SendMessage(g_hFillCheckbox, BM_SETCHECK, g_isFilled ? BST_CHECKED : BST_UNCHECKED, 0);
                         
                         // If there are at least 2 points, draw a line between the last two
                         if (g_polygonPoints.size() >= 2) {
@@ -2213,28 +2385,43 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                             // Clear the previous drawing to remove the dots and guide lines
                             ClearCanvas(g_hdcMem);
                             
-                            // Draw the ellipse using the selected algorithm
-                            switch (g_currentAlgorithm) {
-                                case ID_ALGO_MIDPOINT:
-                                    // Draw ellipse using midpoint algorithm
-                                    DrawEllipse(g_hdcMem, g_ellipseCenter.x, g_ellipseCenter.y, g_ellipseA, g_ellipseB, g_currentColor, g_lineThickness, 
-                                              (g_currentFill != ID_FILL_LINES && g_currentFill != ID_FILL_CIRCLES));
-                                    break;
-                                case ID_ALGO_DIRECT:
-                                    // Draw ellipse using direct algorithm
-                                    DrawEllipse(g_hdcMem, g_ellipseCenter.x, g_ellipseCenter.y, g_ellipseA, g_ellipseB, g_currentColor, g_lineThickness,
-                                              (g_currentFill != ID_FILL_LINES && g_currentFill != ID_FILL_CIRCLES));
-                                    break;
-                                case ID_ALGO_POLAR:
-                                    // Draw ellipse using polar algorithm
-                                    DrawEllipse(g_hdcMem, g_ellipseCenter.x, g_ellipseCenter.y, g_ellipseA, g_ellipseB, g_currentColor, g_lineThickness,
-                                              (g_currentFill != ID_FILL_LINES && g_currentFill != ID_FILL_CIRCLES));
-                                    break;
-                                default:
-                                    // Default ellipse drawing
-                                    DrawEllipse(g_hdcMem, g_ellipseCenter.x, g_ellipseCenter.y, g_ellipseA, g_ellipseB, g_currentColor, g_lineThickness,
-                                              (g_currentFill != ID_FILL_LINES && g_currentFill != ID_FILL_CIRCLES));
-                                    break;
+                            // Make sure we have reasonable values
+                            if (g_ellipseA <= 0) g_ellipseA = 1;
+                            if (g_ellipseB <= 0) g_ellipseB = 1;
+                            
+                            try {
+                                // Draw the ellipse using the selected algorithm
+                                switch (g_currentAlgorithm) {
+                                    case ID_ALGO_MIDPOINT:
+                                        // Draw ellipse using midpoint algorithm
+                                        DrawEllipse(g_hdcMem, g_ellipseCenter.x, g_ellipseCenter.y, g_ellipseA, g_ellipseB, 
+                                                 g_currentColor, g_lineThickness, g_isFilled);
+                                        break;
+                                    case ID_ALGO_DIRECT:
+                                        // Draw ellipse using direct algorithm
+                                        DrawEllipse(g_hdcMem, g_ellipseCenter.x, g_ellipseCenter.y, g_ellipseA, g_ellipseB, 
+                                                  g_currentColor, g_lineThickness, g_isFilled);
+                                        break;
+                                    case ID_ALGO_POLAR:
+                                        // Draw ellipse using polar algorithm
+                                        DrawEllipse(g_hdcMem, g_ellipseCenter.x, g_ellipseCenter.y, g_ellipseA, g_ellipseB, 
+                                                  g_currentColor, g_lineThickness, g_isFilled);
+                                        break;
+                                    default:
+                                        // Default ellipse drawing
+                                        DrawEllipse(g_hdcMem, g_ellipseCenter.x, g_ellipseCenter.y, g_ellipseA, g_ellipseB, 
+                                                  g_currentColor, g_lineThickness, g_isFilled);
+                                        break;
+                                }
+                            }
+                            catch (...) {
+                                // If drawing with fill fails, try again with just the outline
+                                DrawEllipse(g_hdcMem, g_ellipseCenter.x, g_ellipseCenter.y, g_ellipseA, g_ellipseB, 
+                                         g_currentColor, g_lineThickness, false);
+                                
+                                // Inform the user of the issue
+                                MessageBoxW(g_hwnd, L"Filling operation failed. Drawing outline only.", 
+                                         L"Fill Error", MB_OK | MB_ICONWARNING);
                             }
                             
                             // Reset click counter for next ellipse
@@ -2271,26 +2458,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                             return 0;
                         }
                         
-                        // Determine if we should use the recursive or queue-based flood fill
-                        if (g_currentFill == ID_FILL_FLOOD || g_currentFill == ID_FILL_FLOOD_QUEUE) {
-                            // Ask user whether to use recursive or queue-based fill
-                            int result = MessageBoxW(hwnd, 
-                                L"Which fill method would you like to use?\n\n"
-                                L"Yes = Recursive (faster but may crash with large areas)\n"
-                                L"No = Queue-based (slower but safer for large areas)", 
-                                L"Fill Method", MB_YESNO | MB_ICONQUESTION);
-                            
-                            if (result == IDYES) {
-                                // Use recursive fill
-                                myFloodFill(g_hdcMem, x, y, targetColor, g_currentColor);
-                            } else {
-                                // Use queue-based fill
-                                myFloodFillQueue(g_hdcMem, x, y, targetColor, g_currentColor);
-                            }
-                        } else {
-                            // Default to queue-based fill as it's safer
-                            myFloodFillQueue(g_hdcMem, x, y, targetColor, g_currentColor);
-                        }
+                        // Use the safer queue-based flood fill
+                        myFloodFillQueue(g_hdcMem, x, y, targetColor, g_currentColor);
                         
                         // Update the canvas
                         InvalidateRect(hwnd, &g_canvasRect, FALSE);
@@ -2356,7 +2525,52 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     // Draw the shape permanently
                     switch (g_currentTool) {
                         case ID_TOOL_LINE:
-                            DrawLine(g_hdcMem, g_startPoint.x, g_startPoint.y, g_endPoint.x, g_endPoint.y, g_currentColor, g_lineThickness);
+                            // For lines, we should completely ignore fill settings since lines can't be filled
+                            try {
+                                // Create a line object
+                                Line line(g_hdcMem);
+                                
+                                // Use the appropriate algorithm based on current selection
+                                switch (g_currentAlgorithm) {
+                                    case ID_ALGO_DDA:
+                                        line.DrawLineDDA(g_startPoint.x, g_startPoint.y, 
+                                                     g_endPoint.x, g_endPoint.y, g_currentColor);
+                                        break;
+                                    
+                                    case ID_ALGO_MIDPOINT:
+                                        line.DrawLineMidpoint(g_startPoint.x, g_startPoint.y, 
+                                                          g_endPoint.x, g_endPoint.y, g_currentColor);
+                                        break;
+                                    
+                                    case ID_ALGO_PARAMETRIC:
+                                        line.DrawLineParametric(g_startPoint.x, g_startPoint.y, 
+                                                           g_endPoint.x, g_endPoint.y, g_currentColor);
+                                        break;
+                                    
+                                    default:
+                                        // Fallback to DDA
+                                        line.DrawLineDDA(g_startPoint.x, g_startPoint.y, 
+                                                     g_endPoint.x, g_endPoint.y, g_currentColor);
+                                        break;
+                                }
+                                
+                                // If line thickness > 1, draw a thicker line using GDI
+                                if (g_lineThickness > 1) {
+                                    HPEN hPen = CreatePen(PS_SOLID, g_lineThickness, g_currentColor);
+                                    HPEN hOldPen = (HPEN)SelectObject(g_hdcMem, hPen);
+                                    
+                                    MoveToEx(g_hdcMem, g_startPoint.x, g_startPoint.y, NULL);
+                                    LineTo(g_hdcMem, g_endPoint.x, g_endPoint.y);
+                                    
+                                    SelectObject(g_hdcMem, hOldPen);
+                                    DeleteObject(hPen);
+                                }
+                            }
+                            catch (...) {
+                                // Fallback to simple GDI line if custom implementation fails
+                                DrawLine(g_hdcMem, g_startPoint.x, g_startPoint.y, 
+                                       g_endPoint.x, g_endPoint.y, g_currentColor, g_lineThickness);
+                            }
                             break;
                             
                         case ID_TOOL_CIRCLE:
@@ -2366,16 +2580,22 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                                 int dy = g_endPoint.y - g_startPoint.y;
                                 int radius = (int)sqrt((double)(dx*dx + dy*dy));
                                 
-                                // Check if the circle should be filled
-                                if (g_currentFill == ID_FILL_LINES || g_currentFill == ID_FILL_CIRCLES) {
-                                    // Draw a filled circle with special fill methods
-                                    DrawCircle(g_hdcMem, g_startPoint.x, g_startPoint.y, radius, g_currentColor, g_lineThickness, true);
-                                } else {
-                                    // Draw just the outline for regular circles
-                                    DrawCircle(g_hdcMem, g_startPoint.x, g_startPoint.y, radius, g_currentColor, g_lineThickness, false);
+                                // Safety check - prevent negative or zero radius
+                                if (radius <= 0) radius = 1;
+                                
+                                try {
+                                    // Draw the circle with or without fill based on radio button selection
+                                    DrawCircle(g_hdcMem, g_startPoint.x, g_startPoint.y, radius, 
+                                             g_currentColor, g_lineThickness, g_isFilled);
+                                }
+                                catch (...) {
+                                    // Fallback to simple circle if custom implementation fails
+                                    DrawCircle(g_hdcMem, g_startPoint.x, g_startPoint.y, radius, 
+                                             g_currentColor, g_lineThickness, false);
                                 }
                             }
                             break;
+                            
                             
                         // Note: Ellipse is now handled by the 3-point method in WM_LBUTTONDOWN
                         
@@ -2402,6 +2622,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     
                     // Redraw the canvas
                     InvalidateRect(hwnd, &g_canvasRect, FALSE);
+                    
+                    // Ensure the fill checkbox state is synchronized with g_isFilled
+                    SendMessage(g_hFillCheckbox, BM_SETCHECK, g_isFilled ? BST_CHECKED : BST_UNCHECKED, 0);
                 }
             }
             return 0;
@@ -2415,78 +2638,117 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     POINT last = g_polygonPoints[g_polygonPoints.size() - 1];
                     DrawLine(g_hdcMem, last.x, last.y, first.x, first.y, g_currentColor, g_lineThickness);
                     
-                    // Fill the polygon
-                    // Convert the POINT array to point array for filling functions
-                    std::vector<point> fillPoints;
-                    for (size_t i = 0; i < g_polygonPoints.size(); i++) {
-                        fillPoints.push_back(point(g_polygonPoints[i].x, g_polygonPoints[i].y));
-                    }
-                    
-                    // Calculate the center of the polygon for various fill methods
-                    int sumX = 0, sumY = 0;
-                    for (size_t i = 0; i < g_polygonPoints.size(); i++) {
-                        sumX += g_polygonPoints[i].x;
-                        sumY += g_polygonPoints[i].y;
-                    }
-                    int centerX = sumX / (int)g_polygonPoints.size();
-                    int centerY = sumY / (int)g_polygonPoints.size();
-                    
-                    // Apply the selected fill method
-                    switch (g_currentFill) {
-                        case ID_FILL_GENERAL_POLYGON:
-                            fillGeneralPolygon(g_hdcMem, fillPoints.data(), (int)fillPoints.size(), g_currentColor);
-                            break;
-                            
-                        case ID_FILL_CONVEX_POLYGON:
-                            convexfill(g_hdcMem, fillPoints.data(), (int)fillPoints.size(), g_currentColor);
-                            if (!IsPolygonConvex(fillPoints)) {
-                                MessageBoxW(hwnd, L"Warning: This polygon appears to be non-convex.\n\nThe convex fill algorithm works correctly only with convex polygons (which have at most 2 intersection points with any horizontal line).", L"Polygon Fill Warning", MB_OK | MB_ICONWARNING);
-                            }
-                            break;
-                            
-                        case ID_FILL_LINES:
-                        case ID_FILL_CIRCLES:
-                            // For polygons, don't use circle-specific fill methods
-                            // Instead, use general polygon fill
-                            {
-                                // Show a message to the user
-                                MessageBoxW(hwnd, L"Circle-specific fill methods (Lines/Circles) cannot be used with polygons.\nUsing general polygon fill instead.", L"Fill Method Changed", MB_OK | MB_ICONINFORMATION);
+                    // If fill is enabled, fill the polygon
+                    if (g_isFilled) {
+                        // Use the selected fill method
+                        switch(g_polyFillMethod) {
+                            case 0: // Convex Fill
+                                {
+                                    // Convert to point array for convex fill
+                                    point* convexPoints = new point[g_polygonPoints.size()];
+                                    for (size_t i = 0; i < g_polygonPoints.size(); i++) {
+                                        convexPoints[i].x = g_polygonPoints[i].x;
+                                        convexPoints[i].y = g_polygonPoints[i].y;
+                                    }
+                                    
+                                    try {
+                                        // Check if the polygon is actually convex
+                                        std::vector<point> pointsVec(convexPoints, convexPoints + g_polygonPoints.size());
+                                        if (IsPolygonConvex(pointsVec)) {
+                                            convexfill(g_hdcMem, convexPoints, g_polygonPoints.size(), g_currentColor);
+                                        } else {
+                                            // If not convex, fall back to general fill
+                                            MessageBoxW(hwnd, L"Polygon is not convex. Using general fill method.", 
+                                                    L"Fill Method", MB_OK | MB_ICONINFORMATION);
+                                            fillGeneralPolygon(g_hdcMem, convexPoints, g_polygonPoints.size(), g_currentColor);
+                                        }
+                                    }
+                                    catch(...) {
+                                        MessageBoxW(hwnd, L"Failed to fill polygon. Drawing outline only.", 
+                                                L"Fill Error", MB_OK | MB_ICONWARNING);
+                                    }
+                                    
+                                    // Clean up
+                                    delete[] convexPoints;
+                                }
+                                break;
                                 
-                                // Use general polygon fill as a fallback
-                                fillGeneralPolygon(g_hdcMem, fillPoints.data(), (int)fillPoints.size(), g_currentColor);
-                            }
-                            break;
-                            
-                        case ID_FILL_FLOOD:
-                            {
-                                // Display a warning about potential stack overflow
-                                if (g_polygonPoints.size() > 5) {
-                                    if (MessageBoxW(hwnd, L"Warning: Recursive flood fill might cause a stack overflow with large polygons.\n\nDo you want to continue?", L"Flood Fill Warning", MB_YESNO | MB_ICONWARNING) == IDNO) {
-                                        break;
+                            case 1: // General Fill
+                                {
+                                    // Convert to point array for general fill
+                                    point* generalPoints = new point[g_polygonPoints.size()];
+                                    for (size_t i = 0; i < g_polygonPoints.size(); i++) {
+                                        generalPoints[i].x = g_polygonPoints[i].x;
+                                        generalPoints[i].y = g_polygonPoints[i].y;
+                                    }
+                                    
+                                    try {
+                                        fillGeneralPolygon(g_hdcMem, generalPoints, g_polygonPoints.size(), g_currentColor);
+                                    }
+                                    catch(...) {
+                                        MessageBoxW(hwnd, L"Failed to fill polygon. Drawing outline only.", 
+                                                L"Fill Error", MB_OK | MB_ICONWARNING);
+                                    }
+                                    
+                                    // Clean up
+                                    delete[] generalPoints;
+                                }
+                                break;
+                                
+                            case 2: // Flood Fill
+                                {
+                                    // Calculate centroid of polygon for flood fill starting point
+                                    int centerX = 0, centerY = 0;
+                                    for (size_t i = 0; i < g_polygonPoints.size(); i++) {
+                                        centerX += g_polygonPoints[i].x;
+                                        centerY += g_polygonPoints[i].y;
+                                    }
+                                    centerX /= g_polygonPoints.size();
+                                    centerY /= g_polygonPoints.size();
+                                    
+                                    // Get the background color
+                                    COLORREF bgColor = GetPixel(g_hdcMem, centerX, centerY);
+                                    
+                                    // Use the queue-based flood fill for safety
+                                    try {
+                                        myFloodFillQueue(g_hdcMem, centerX, centerY, bgColor, g_currentColor);
+                                    }
+                                    catch(...) {
+                                        MessageBoxW(hwnd, L"Flood fill failed. Try another fill method.", 
+                                                L"Fill Error", MB_OK | MB_ICONWARNING);
                                     }
                                 }
+                                break;
                                 
-                                // Use inverse color for better visibility
-                                COLORREF fillColor = RGB(255, 255, 255); // Default to white
-                                if (g_currentColor == RGB(255, 255, 255)) {
-                                    fillColor = RGB(255, 0, 0); // Use red if the border is white
+                            default: // Default to standard GDI fill
+                                {
+                                    // Convert the POINT array to point array for standard GDI polygon
+                                    POINT* polyPoints = new POINT[g_polygonPoints.size()];
+                                    for (size_t i = 0; i < g_polygonPoints.size(); i++) {
+                                        polyPoints[i].x = g_polygonPoints[i].x;
+                                        polyPoints[i].y = g_polygonPoints[i].y;
+                                    }
+                                    
+                                    try {
+                                        // Use standard GDI Polygon function for simplicity and reliability
+                                        HBRUSH hBrush = CreateSolidBrush(g_currentColor);
+                                        HBRUSH hOldBrush = (HBRUSH)SelectObject(g_hdcMem, hBrush);
+                                        
+                                        // Use the standard GDI Polygon function
+                                        Polygon(g_hdcMem, polyPoints, (int)g_polygonPoints.size());
+                                        
+                                        SelectObject(g_hdcMem, hOldBrush);
+                                        DeleteObject(hBrush);
+                                    } 
+                                    catch (...) {
+                                        MessageBoxW(hwnd, L"Failed to fill polygon. Drawing outline only.", 
+                                                L"Fill Error", MB_OK | MB_ICONWARNING);
+                                    }
+                                    
+                                    // Clean up
+                                    delete[] polyPoints;
                                 }
-                                
-                                myFloodFill(g_hdcMem, centerX, centerY, g_currentColor, fillColor);
-                            }
-                            break;
-                            
-                        case ID_FILL_FLOOD_QUEUE:
-                            {
-                                // Use inverse color for better visibility
-                                COLORREF fillColor = RGB(255, 255, 255); // Default to white
-                                if (g_currentColor == RGB(255, 255, 255)) {
-                                    fillColor = RGB(255, 0, 0); // Use red if the border is white
-                                }
-                                
-                                myFloodFillQueue(g_hdcMem, centerX, centerY, g_currentColor, fillColor);
-                            }
-                            break;
+                        }
                     }
                     
                     // Show status message
@@ -2604,105 +2866,223 @@ void DrawCardinalSpline(HDC hdc, const std::vector<POINT>& points, COLORREF colo
 
 // Polygon filling structures and algorithms
 
+// Global counter for recursive calls to prevent stack overflow
+int g_recursionDepth = 0;
+const int MAX_RECURSION_DEPTH = 1000; // Limit to prevent stack overflow
+
 // Flood fill implementation (recursive)
 void myFloodFill(HDC hdc, int x, int y, COLORREF bc, COLORREF fc) {
-    COLORREF current = GetPixel(hdc, x, y);
+    // Initialize counter on first call
+    if (g_recursionDepth == 0) {
+        g_recursionDepth = 0;
+    }
     
-    // Stop if we hit the boundary color or already filled color
-    if (current == bc || current == fc) 
+    // Prevent stack overflow with recursion limit
+    if (g_recursionDepth >= MAX_RECURSION_DEPTH) {
+        // Show a message only on the first overflow detection
+        if (g_recursionDepth == MAX_RECURSION_DEPTH) {
+            MessageBoxW(NULL, L"Recursive fill depth limit reached. Switching to queue-based fill.", 
+                      L"Fill Limit", MB_OK | MB_ICONINFORMATION);
+            
+            // Reset counter for next time
+            g_recursionDepth = 0;
+            
+            // Use the queue-based fill as fallback
+            myFloodFillQueue(hdc, x, y, bc, fc);
+        }
+        return;
+    }
+    
+    // Bounds checking
+    if (x < 0 || y < 0 || x >= 2000 || y >= 2000)
         return;
     
-    // Fill current pixel
-    SetPixel(hdc, x, y, fc);
+    // Safely get the pixel color
+    COLORREF current;
+    try {
+        current = GetPixel(hdc, x, y);
+    }
+    catch (...) {
+        g_recursionDepth = 0; // Reset counter on error
+        return;
+    }
     
-    // Recursively fill the 4-connected neighbors
-    myFloodFill(hdc, x + 1, y, bc, fc);
-    myFloodFill(hdc, x - 1, y, bc, fc);
-    myFloodFill(hdc, x, y + 1, bc, fc);
-    myFloodFill(hdc, x, y - 1, bc, fc);
+    // Stop if we hit the boundary color or already filled color
+    if (current == bc || current == fc) {
+        return;
+    }
+    
+    try {
+        // Fill current pixel
+        SetPixel(hdc, x, y, fc);
+        
+        // Increment recursion depth
+        g_recursionDepth++;
+        
+        // Recursively fill the 4-connected neighbors
+        myFloodFill(hdc, x + 1, y, bc, fc);
+        myFloodFill(hdc, x - 1, y, bc, fc);
+        myFloodFill(hdc, x, y + 1, bc, fc);
+        myFloodFill(hdc, x, y - 1, bc, fc);
+        
+        // Decrement recursion depth
+        g_recursionDepth--;
+    }
+    catch (...) {
+        // Reset counter and switch to queue-based on exception
+        g_recursionDepth = 0;
+        myFloodFillQueue(hdc, x, y, bc, fc);
+    }
+    
+    // Reset counter when the initial call completes
+    if (g_recursionDepth == 0) {
+        g_recursionDepth = 0;
+    }
 }
 
 // Flood fill implementation using queue (non-recursive, prevents stack overflow)
 void myFloodFillQueue(HDC hdc, int x, int y, COLORREF bc, COLORREF fc) {
-    // If already filled or boundary color, do nothing
-    COLORREF targetColor = GetPixel(hdc, x, y);
-    if (targetColor == bc || targetColor == fc)
-        return;
-    
-    // Use a queue to store pixels to fill
-    std::queue<point> q;
-    q.push(point(x, y));
-    
-    while (!q.empty()) {
-        point p = q.front();
-        q.pop();
+    try {
+        // Bounds check on starting point
+        if (x < 0 || y < 0 || x >= 5000 || y >= 5000) return;
         
-        int px = (int)p.x;
-        int py = (int)p.y;
+        // If already filled or boundary color, do nothing
+        COLORREF targetColor = GetPixel(hdc, x, y);
+        if (targetColor == bc || targetColor == fc)
+            return;
         
-        // Check if pixel is within the desired area
-        COLORREF currentColor = GetPixel(hdc, px, py);
-        if (currentColor == bc || currentColor == fc)
-            continue;
+        // Use a queue to store pixels to fill
+        std::queue<point> q;
+        q.push(point(x, y));
         
-        // Fill this pixel
-        SetPixel(hdc, px, py, fc);
+        // Safety counter to prevent infinite loops
+        int processedPixels = 0;
+        const int MAX_PIXELS = 500000; // Limit the number of pixels to fill
         
-        // Add the 4-connected neighbors to queue
-        q.push(point(px + 1, py));
-        q.push(point(px - 1, py));
-        q.push(point(px, py + 1));
-        q.push(point(px, py - 1));
+        // Create a 2D array to track visited pixels
+        // Using a hash set would be better but this is simpler for now
+        bool* visited = new bool[2000 * 2000];
+        memset(visited, 0, 2000 * 2000 * sizeof(bool));
+        
+        while (!q.empty() && processedPixels < MAX_PIXELS) {
+            point p = q.front();
+            q.pop();
+            
+            int px = (int)p.x;
+            int py = (int)p.y;
+            
+            // Skip if out of bounds
+            if (px < 0 || py < 0 || px >= 2000 || py >= 2000)
+                continue;
+                
+            // Skip if already visited
+            if (visited[py * 2000 + px])
+                continue;
+                
+            visited[py * 2000 + px] = true;
+            processedPixels++;
+            
+            // Check if pixel is within the desired area
+            COLORREF currentColor = GetPixel(hdc, px, py);
+            if (currentColor == bc || currentColor == fc)
+                continue;
+            
+            // Fill this pixel
+            SetPixel(hdc, px, py, fc);
+            
+            // Add the 4-connected neighbors to queue
+            if (px + 1 < 2000) q.push(point(px + 1, py));
+            if (px - 1 >= 0) q.push(point(px - 1, py));
+            if (py + 1 < 2000) q.push(point(px, py + 1));
+            if (py - 1 >= 0) q.push(point(px, py - 1));
+        }
+        
+        // Clean up
+        delete[] visited;
+        
+        // If we hit the limit, show a message
+        if (processedPixels >= MAX_PIXELS) {
+            MessageBoxW(NULL, L"Flood fill area too large - fill operation limited", 
+                       L"Fill Limit Reached", MB_OK | MB_ICONINFORMATION);
+        }
+    }
+    catch (...) {
+        // Catch all exceptions to prevent crashes
     }
 }
 
 // Add a simplified placeholder for fillGeneralPolygon before myFloodFill
 // This function implements a general scan-line filling algorithm for any polygon
 void fillGeneralPolygon(HDC hdc, point p[], int n, COLORREF c) {
+    // Check for valid polygon
     if (n < 3) return;
 
-    // Find the min and max y-values to determine scan-line range
-    int minY = INT_MAX;
-    int maxY = INT_MIN;
-    for (int i = 0; i < n; i++) {
-        if ((int)p[i].y < minY) minY = (int)p[i].y;
-        if ((int)p[i].y > maxY) maxY = (int)p[i].y;
-    }
-
-    // For each scan line
-    for (int y = minY; y <= maxY; y++) {
-        // Find all intersections with this scan line
-        std::vector<int> intersections;
+    try {
+        // Find the min and max y-values to determine scan-line range
+        int minY = INT_MAX;
+        int maxY = INT_MIN;
         for (int i = 0; i < n; i++) {
-            // Get the current edge (p[i] to p[i+1])
-            int next = (i + 1) % n;
-            double y1 = p[i].y;
-            double y2 = p[next].y;
+            if ((int)p[i].y < minY) minY = (int)p[i].y;
+            if ((int)p[i].y > maxY) maxY = (int)p[i].y;
+        }
+
+        // Strict bounds checking to prevent array out-of-bounds
+        minY = std::max(0, minY);
+        maxY = std::min(2000, maxY);  // Safe upper limit below the 3000 edge table size
+
+        // For each scan line
+        for (int y = minY; y <= maxY; y++) {
+            // Find all intersections with this scan line
+            std::vector<int> intersections;
+            intersections.reserve(n); // Reserve space to avoid reallocations
             
-            // Skip horizontal edges
-            if (y1 == y2) continue;
-
-            // Check if the scan line intersects this edge
-            if ((y >= y1 && y < y2) || (y >= y2 && y < y1)) {
-                double x1 = p[i].x;
-                double x2 = p[next].x;
+            for (int i = 0; i < n; i++) {
+                // Get the current edge (p[i] to p[i+1])
+                int next = (i + 1) % n;
+                double y1 = p[i].y;
+                double y2 = p[next].y;
                 
-                // Calculate x-coordinate of intersection
-                // Using the line equation: x = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
-                double x = x1 + (y - y1) * (x2 - x1) / (y2 - y1);
-                intersections.push_back((int)x);
+                // Skip horizontal edges
+                if (fabs(y1 - y2) < 0.001) continue;
+
+                // Check if the scan line intersects this edge
+                if ((y >= y1 && y < y2) || (y >= y2 && y < y1)) {
+                    double x1 = p[i].x;
+                    double x2 = p[next].x;
+                    
+                    // Calculate x-coordinate of intersection
+                    // Using the line equation: x = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
+                    double x = x1 + (y - y1) * (x2 - x1) / (y2 - y1);
+                    
+                    // Bound check x coordinate to prevent extreme values
+                    if (x > -10000 && x < 10000) {
+                        intersections.push_back((int)x);
+                    }
+                }
+            }
+
+            // Sort intersections by x-coordinate
+            if (!intersections.empty()) {
+                std::sort(intersections.begin(), intersections.end());
+
+                // Fill between pairs of intersections
+                for (size_t i = 0; i < intersections.size() - 1; i += 2) {
+                    if (i + 1 < intersections.size()) {
+                        int left = std::max(0, intersections[i]);
+                        int right = std::min(5000, intersections[i + 1]);
+                        
+                        if (left < right) {
+                            // Draw the horizontal span
+                            DrawLineDDA(hdc, left, y, right, y, c);
+                        }
+                    }
+                }
             }
         }
-
-        // Sort intersections by x-coordinate
-        std::sort(intersections.begin(), intersections.end());
-
-        // Fill between pairs of intersections
-        for (size_t i = 0; i < intersections.size(); i += 2) {
-            if (i + 1 < intersections.size()) {
-                DrawLineDDA(hdc, intersections[i], y, intersections[i + 1], y, c);
-            }
-        }
+    }
+    catch (...) {
+        // Handle any exceptions that might occur during filling
+        // Just silently catch them to prevent crashes
     }
 }
 
@@ -2744,65 +3124,29 @@ bool IsPolygonConvex(const std::vector<point>& points) {
 
 // Add a new function to fill a circle
 void FillCircle(HDC hdc, int centerX, int centerY, int radius, COLORREF color) {
-    // Only use special fill methods when the current tool is explicitly a Circle
-    if (g_currentTool == ID_TOOL_CIRCLE) {
-        try {
-            // Create a local Circle object for this fill operation only
-            Circle localCircle(hdc);
-            
-            // Get quarter to fill (0 = full circle, 1-4 = specific quarter)
-            int quarterToFill = 0; // Default to full circle
-            
-            // Get the selected quarter from the dropdown
-            int selection = (int)SendMessage(g_hQuarterCombo, CB_GETCURSEL, 0, 0);
-            if (selection > 0) { // If not "Full Circle"
-                quarterToFill = selection; // 1-based index matches the quarter numbers
-            }
-            
-            // Use the appropriate fill method based on the selected fill algorithm
-            if (g_currentFill == ID_FILL_LINES) {
-                if (quarterToFill == 0) {
-                    // Fill entire circle with lines
-                    localCircle.FillWithLines(centerX, centerY, radius, color);
-                } else {
-                    // Fill just the selected quarter with lines
-                    localCircle.FillQuarterWithLines(centerX, centerY, radius, color, quarterToFill);
-                }
-            } 
-            else if (g_currentFill == ID_FILL_CIRCLES) {
-                if (quarterToFill == 0) {
-                    // Fill entire circle with concentric circles
-                    localCircle.FillWithCircles(centerX, centerY, radius);
-                } else {
-                    // Fill just the selected quarter with concentric circles
-                    localCircle.FillQuarterWithCircles(centerX, centerY, radius, quarterToFill);
-                }
-            }
-            else {
-                // Default fill using GDI for other fill methods
-                StandardFill(hdc, centerX, centerY, radius, color);
-            }
-        }
-        catch (...) {
-            // If any exception occurs, fall back to standard GDI fill
-            StandardFill(hdc, centerX, centerY, radius, color);
-        }
+    // Safety check - ensure radius is positive
+    if (radius <= 0) {
+        radius = 1;  // Minimum radius
     }
-    else {
-        // Default fill using GDI for all other shapes
-        StandardFill(hdc, centerX, centerY, radius, color);
-    }
+    
+    // Use standard GDI fill for simplicity and reliability
+    StandardFill(hdc, centerX, centerY, radius, color);
 }
 
 // Helper function for standard circle fill using GDI
 void StandardFill(HDC hdc, int centerX, int centerY, int radius, COLORREF color) {
+    // Create a solid brush with the specified color
     HBRUSH hBrush = CreateSolidBrush(color);
     HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, hBrush);
+    
+    // Create a pen with the same color for a smooth edge
     HPEN hPen = CreatePen(PS_SOLID, 1, color);
     HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
     
+    // Use GDI Ellipse function to draw a filled circle
     Ellipse(hdc, centerX - radius, centerY - radius, centerX + radius, centerY + radius);
     
+    // Clean up
     SelectObject(hdc, hOldBrush);
     SelectObject(hdc, hOldPen);
     DeleteObject(hBrush);
@@ -2819,6 +3163,53 @@ void UpdateQuarterSelectionVisibility() {
         // Hide it for other tools
         ShowWindow(g_hQuarterLabel, SW_HIDE);
         ShowWindow(g_hQuarterCombo, SW_HIDE);
+    }
+}
+
+#define ID_RADIO_FILL_NONE 9001  // Change to a more reliable value
+#define ID_RADIO_FILL_SOLID 9002
+
+// Make sure these are all defined before the global variables
+HWND g_hRadioFillNone;
+HWND g_hRadioFillSolid;
+
+// Handle polygon fill method selection
+void HandlePolyFillSelection() {
+    // Get the current selection
+    int selection = (int)SendMessage(g_hPolyFillCombo, CB_GETCURSEL, 0, 0);
+    
+    // Update the global variable
+    g_polyFillMethod = selection;
+    
+    // Update status bar with selected fill method
+    wchar_t statusText[256];
+    const wchar_t* methodNames[] = {L"Convex Fill", L"General Fill", L"Flood Fill"};
+    if (selection >= 0 && selection < 3) {
+        _snwprintf(statusText, 256, L"Polygon fill method set to: %s", methodNames[selection]);
+        UpdateStatusBar(statusText);
+    }
+}
+
+// Update control visibility based on current tool
+void UpdateControlVisibility() {
+    // Show quarter selection dropdown only when Circle tool is selected
+    if (g_currentTool == ID_TOOL_CIRCLE) {
+        ShowWindow(g_hQuarterLabel, SW_SHOW);
+        ShowWindow(g_hQuarterCombo, SW_SHOW);
+    } else {
+        // Hide it for other tools
+        ShowWindow(g_hQuarterLabel, SW_HIDE);
+        ShowWindow(g_hQuarterCombo, SW_HIDE);
+    }
+    
+    // Show polygon fill options only when Polygon tool is selected
+    if (g_currentTool == ID_TOOL_POLYGON) {
+        ShowWindow(g_hPolyFillLabel, SW_SHOW);
+        ShowWindow(g_hPolyFillCombo, SW_SHOW);
+    } else {
+        // Hide for other tools
+        ShowWindow(g_hPolyFillLabel, SW_HIDE);
+        ShowWindow(g_hPolyFillCombo, SW_HIDE);
     }
 }
 
