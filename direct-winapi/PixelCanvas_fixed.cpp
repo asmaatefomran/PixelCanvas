@@ -2099,7 +2099,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     // Handle the fill checkbox
                     else if (LOWORD(wParam) == ID_FILL_CHECKBOX) {
                         // Update the g_isFilled flag based on checkbox state
-                        g_isFilled = (SendMessage(g_hFillCheckbox, BM_GETCHECK, 0, 0) == BST_CHECKED);
+                        BOOL isChecked = (SendMessage(g_hFillCheckbox, BM_GETCHECK, 0, 0) == BST_CHECKED);
+                        g_isFilled = (isChecked == TRUE);
                         
                         // Update status bar with clear message
                         wchar_t statusText[256];
@@ -2248,8 +2249,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         // Make sure polygon fill options are visible
                         UpdateControlVisibility();
                         
-                        // Store current fill checkbox state before drawing
-                        bool currentFillState = g_isFilled;
+                        // Check the actual state of the checkbox directly - don't rely on g_isFilled
+                        BOOL isChecked = (SendMessage(g_hFillCheckbox, BM_GETCHECK, 0, 0) == BST_CHECKED);
                         
                         // Add point to polygon
                         POINT pt = {x, y};
@@ -2258,8 +2259,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         // Draw a small point to mark the vertex - always fill with a small dot regardless of fill state
                         DrawCircle(g_hdcMem, x, y, 2, g_currentColor, 1, true);
                         
-                        // Restore fill state
-                        g_isFilled = currentFillState;
+                        // Update g_isFilled with the actual checkbox state to keep them in sync
+                        g_isFilled = (isChecked == TRUE);
                         SendMessage(g_hFillCheckbox, BM_SETCHECK, g_isFilled ? BST_CHECKED : BST_UNCHECKED, 0);
                         
                         // If there are at least 2 points, draw a line between the last two
@@ -2637,6 +2638,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     POINT first = g_polygonPoints[0];
                     POINT last = g_polygonPoints[g_polygonPoints.size() - 1];
                     DrawLine(g_hdcMem, last.x, last.y, first.x, first.y, g_currentColor, g_lineThickness);
+                    
+                    // Check the actual state of the checkbox directly
+                    BOOL isChecked = (SendMessage(g_hFillCheckbox, BM_GETCHECK, 0, 0) == BST_CHECKED);
+                    g_isFilled = (isChecked == TRUE);
                     
                     // If fill is enabled, fill the polygon
                     if (g_isFilled) {
