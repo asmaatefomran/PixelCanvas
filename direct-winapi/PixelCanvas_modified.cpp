@@ -4,8 +4,6 @@
 #define UNICODE
 #define _UNICODE
 
-// Note: This version uses integrated filling functions directly instead of including filling.h
-
 #include <windows.h>
 #include <shellapi.h>
 #include <string>
@@ -16,7 +14,7 @@
 #include <math.h>
 #include <iostream>
 #include <algorithm> // For std::max, std::min
-#include <cmath>     // For std::abs and std::round
+#include <cmath>     // For std::abs
 #include <queue>     // For queue in flood fill
 #include <climits>   // For INT_MAX, INT_MIN
 
@@ -25,9 +23,19 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-// Include custom headers (excluding filling.h)
+// Define MAX and MIN macros to replace std::max and std::min
+#ifndef MAX
+#define MAX(a,b) (((a) > (b)) ? (a) : (b))
+#endif
+
+#ifndef MIN
+#define MIN(a,b) (((a) < (b)) ? (a) : (b))
+#endif
+
+// Include custom headers
 #include "../include/Circle.h"
 #include "../include/Line.h"
+#include "../include/filling.h" // Include our custom filling functions
 
 // Define common control constants if not already defined
 #ifndef BTNS_BUTTON
@@ -274,12 +282,12 @@ void edge2table(convexEdgeTable tbl, point v1, point v2) {
         
         // Calculate the scan line range, ensuring we stay within bounds
         int startY = (int)ceil(v1.y);
-        startY = std::max(0, startY);
-        startY = std::min(startY, 2999);
+        startY = MAX(0, startY);
+        startY = MIN(startY, 2999);
         
         int endY = (int)floor(v2.y);
-        endY = std::max(0, endY);
-        endY = std::min(endY, 2999);
+        endY = MAX(0, endY);
+        endY = MIN(endY, 2999);
         
         // For each scan line intersecting this edge
         for (int y = startY; y < endY; y++) {
@@ -287,13 +295,13 @@ void edge2table(convexEdgeTable tbl, point v1, point v2) {
             int xInt = (int)ceil(x);
             
             // Bound check the x coordinate
-            xInt = std::max(-1000, xInt);
-            xInt = std::min(5000, xInt);
+            xInt = MAX(-1000, xInt);
+            xInt = MIN(5000, xInt);
             
             // Update the edge table safely
             if (y >= 0 && y < 3000) {
-                tbl[y].left = std::min(tbl[y].left, xInt);
-                tbl[y].right = std::max(tbl[y].right, xInt);
+                tbl[y].left = MIN(tbl[y].left, xInt);
+                tbl[y].right = MAX(tbl[y].right, xInt);
             }
             
             // Move to next scan line
@@ -336,8 +344,8 @@ void table2screen(HDC hdc, convexEdgeTable tbl, COLORREF c) {
                 // Draw the horizontal line, but only if Y is in a reasonable range
                 if (y >= 0 && y < 2000) {
                     // Clamp x values to reasonable limits
-                    int left = std::max(0, tbl[y].left);
-                    int right = std::min(5000, tbl[y].right);
+                    int left = MAX(0, tbl[y].left);
+                    int right = MIN(5000, tbl[y].right);
                     
                     if (left < right) {
                         DrawLineDDA(hdc, left, y, right, y, c);
@@ -450,7 +458,7 @@ void DrawHermite(HDC hdc, Point p1, Point p2, Derivative t1, Derivative t2, COLO
         double xt = cx[0] * pow(t, 3) + cx[1] * pow(t, 2) + cx[2] * t + cx[3];
         double yt = cy[0] * pow(t, 3) + cy[1] * pow(t, 2) + cy[2] * t + cy[3];
 
-        POINT currentPoint = { (LONG)std::round(xt), (LONG)std::round(yt) };
+        POINT currentPoint = { (LONG)round(xt), (LONG)round(yt) };
         
         if (!firstPoint) {
             MoveToEx(hdc, prevPoint.x, prevPoint.y, NULL);
@@ -1352,158 +1360,108 @@ void DrawLine(HDC hdc, int x1, int y1, int x2, int y2, COLORREF color, int thick
 void DrawCircle(HDC hdc, int centerX, int centerY, int radius, COLORREF color, int thickness, bool filled) {
     // Debug output to check fill value
     wchar_t debugMsg[256];
-    _snwprintf(debugMsg, 256, L"DrawCircle called with filled = %s, quarter = %d", 
-              filled ? L"TRUE" : L"FALSE", g_selectedQuarter);
+    _snwprintf(debugMsg, 256, L"DrawCircle called with filled = %s", filled ? L"TRUE" : L"FALSE");
     OutputDebugStringW(debugMsg);
     
-    // Always draw the circle outline using custom methods
-    Circle circle(hdc);
-    if (g_currentAlgorithm == ID_ALGO_MIDPOINT) {
-        circle.DrawCircleMidpoint(centerX, centerY, radius, color);
-    } else if (g_currentAlgorithm == ID_ALGO_POLAR) {
-        circle.DrawCirclePolar(centerX, centerY, radius, color);
-    } else {
-        circle.DrawCircleMidpoint(centerX, centerY, radius, color);
-    }
-    
-    // If we need to fill the circle
     if (filled) {
-        OutputDebugStringW(L"[DEBUG] Starting custom circle fill");
+        // Use custom fill methods instead of GDI
+        OutputDebugStringW(L"[DEBUG] Using custom fill for circle");
         
-        // Define angle range based on selected quarter
-        double startAngle = 0.0;
-        double endAngle = 0.0;
-        
-        // Determine angle range for the selected quarter
-        switch (g_selectedQuarter) {
-            case ID_QUARTER_1: // Top-right (1st quarter)
-                startAngle = 0.0;
-                endAngle = M_PI / 2.0;
-                break;
-            case ID_QUARTER_2: // Top-left (2nd quarter)
-                startAngle = M_PI / 2.0;
-                endAngle = M_PI;
-                break;
-            case ID_QUARTER_3: // Bottom-left (3rd quarter)
-                startAngle = M_PI;
-                endAngle = 3.0 * M_PI / 2.0;
-                break;
-            case ID_QUARTER_4: // Bottom-right (4th quarter)
-                startAngle = 3.0 * M_PI / 2.0;
-                endAngle = 2.0 * M_PI;
-                break;
-            default: // Full circle
-                startAngle = 0.0;
-                endAngle = 2.0 * M_PI;
-                break;
-        }
-        
-        // Pick bounds for the scanline loop
-        int minY, maxY;
-        
-        if (g_selectedQuarter == ID_QUARTER_FULL) {
-            // For full circle, scan the entire vertical range
-            minY = centerY - radius;
-            maxY = centerY + radius;
-        } else if (g_selectedQuarter == ID_QUARTER_1 || g_selectedQuarter == ID_QUARTER_2) {
-            // Top quarters: scan from top of circle to center
-            minY = centerY - radius;
-            maxY = centerY;
+        // Draw the circle outline
+        Circle circle(hdc);
+        if (g_currentAlgorithm == ID_ALGO_MIDPOINT) {
+            circle.DrawCircleMidpoint(centerX, centerY, radius, color);
+        } else if (g_currentAlgorithm == ID_ALGO_POLAR) {
+            circle.DrawCirclePolar(centerX, centerY, radius, color);
         } else {
-            // Bottom quarters: scan from center to bottom of circle
-            minY = centerY;
-            maxY = centerY + radius;
+            circle.DrawCircleMidpoint(centerX, centerY, radius, color);
         }
         
-        // Bounds safety check
-        if (minY < 0) minY = 0;
-        if (maxY > 10000) maxY = 10000;
-        
-        // Draw horizontal lines for each y-coordinate (scan line)
-        for (int y = minY; y <= maxY; y++) {
-            // Calculate the x offset from center for this y-coordinate
-            int dy = y - centerY;
+        // Create points for filling the circle based on the selected quarter
+        if (g_selectedQuarter == ID_QUARTER_FULL) {
+            // Fill the entire circle using custom methods
+            FillCircle(hdc, centerX, centerY, radius, color);
+        } else {
+            // Handle quarter filling by creating a polygon with the appropriate sector
+            // and using convexfill for the sector
+            const int NUM_POINTS = 20; // Number of points to use for the sector
+            point polygonPoints[NUM_POINTS + 2]; // +2 for center and closing point
             
-            // Skip if dy² > radius² (outside the circle)
-            if (dy * dy > radius * radius)
-                continue;
+            // Start with center point
+            polygonPoints[0] = point(centerX, centerY);
             
-            // Calculate x-coordinate of intersection with circle
-            double dx = sqrt(radius * radius - dy * dy);
+            // Generate arc points for the selected quarter
+            double startAngle = 0.0;
+            double endAngle = 0.0;
             
-            // Determine start and end x-coordinates for this scanline
-            int x1, x2;
-            
-            if (g_selectedQuarter == ID_QUARTER_FULL) {
-                // Full circle: draw complete horizontal line
-                x1 = centerX - (int)dx;
-                x2 = centerX + (int)dx;
-            } else {
-                // For quarters, need to check which side of the x-axis we're on
-                bool isLeft = (g_selectedQuarter == ID_QUARTER_2 || g_selectedQuarter == ID_QUARTER_3);
-                bool isRight = (g_selectedQuarter == ID_QUARTER_1 || g_selectedQuarter == ID_QUARTER_4);
-                
-                if (y < centerY) { // Top half
-                    // Top-left quarter (Q2)
-                    if (isLeft) {
-                        x1 = centerX - (int)dx;
-                        x2 = centerX;
-                    }
-                    // Top-right quarter (Q1)
-                    else if (isRight) {
-                        x1 = centerX;
-                        x2 = centerX + (int)dx;
-                    }
-                    else {
-                        continue; // Skip if not in correct quadrant
-                    }
-                } else { // Bottom half
-                    // Bottom-left quarter (Q3)
-                    if (isLeft) {
-                        x1 = centerX - (int)dx;
-                        x2 = centerX;
-                    }
-                    // Bottom-right quarter (Q4)
-                    else if (isRight) {
-                        x1 = centerX;
-                        x2 = centerX + (int)dx;
-                    }
-                    else {
-                        continue; // Skip if not in correct quadrant
-                    }
-                }
+            // Determine the angle range based on the selected quarter
+            switch (g_selectedQuarter) {
+                case ID_QUARTER_1: // Top-right (1st quarter)
+                    startAngle = 0.0;
+                    endAngle = M_PI / 2.0;
+                    break;
+                case ID_QUARTER_2: // Top-left (2nd quarter)
+                    startAngle = M_PI / 2.0;
+                    endAngle = M_PI;
+                    break;
+                case ID_QUARTER_3: // Bottom-left (3rd quarter)
+                    startAngle = M_PI;
+                    endAngle = 3.0 * M_PI / 2.0;
+                    break;
+                case ID_QUARTER_4: // Bottom-right (4th quarter)
+                    startAngle = 3.0 * M_PI / 2.0;
+                    endAngle = 2.0 * M_PI;
+                    break;
+                default:
+                    startAngle = 0.0;
+                    endAngle = 2.0 * M_PI;
+                    break;
             }
             
-            // Draw the horizontal line segment for this scan line
-            // Use our custom DDA line algorithm
-            DrawLineDDA(hdc, x1, y, x2, y, color);
-        }
-    }
-    
-    // If we need to draw a thicker outline
-    if (!filled && thickness > 1) {
-        HPEN hPen = CreatePen(PS_SOLID, thickness, color);
-        HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
-        
-        // Draw the circle using MoveTo/LineTo for multiple points around the circle
-        const int numPoints = 72; // Draw 72 segments for a smooth circle
-        double angleStep = 2.0 * M_PI / numPoints;
-        
-        for (int i = 0; i <= numPoints; i++) {
-            double angle = i * angleStep;
-            int x = centerX + (int)(radius * cos(angle));
-            int y = centerY + (int)(radius * sin(angle));
-            
-            if (i == 0) {
-                MoveToEx(hdc, x, y, NULL);
-            } else {
-                LineTo(hdc, x, y);
+            // Generate points along the arc
+            for (int i = 0; i < NUM_POINTS; i++) {
+                double angle = startAngle + (i * (endAngle - startAngle) / (NUM_POINTS - 1));
+                polygonPoints[i + 1] = point(
+                    centerX + radius * cos(angle),
+                    centerY + radius * sin(angle)
+                );
             }
+            
+            // Close the polygon back to the center
+            polygonPoints[NUM_POINTS + 1] = polygonPoints[0];
+            
+            // Fill the sector using convexfill
+            convexfill(hdc, polygonPoints, NUM_POINTS + 2, color);
         }
-        
-        // Clean up
-        SelectObject(hdc, hOldPen);
-        DeleteObject(hPen);
+    } else {
+        // For outline, use either GDI or Circle class based on thickness
+        if (thickness <= 1) {
+            // For thin lines, use Circle class for better algorithm control
+            Circle circle(hdc);
+            
+            // For outline only, use the Circle class's drawing method based on the selected algorithm
+            if (g_currentAlgorithm == ID_ALGO_MIDPOINT) {
+                circle.DrawCircleMidpoint(centerX, centerY, radius, color);
+            } else if (g_currentAlgorithm == ID_ALGO_POLAR) {
+                circle.DrawCirclePolar(centerX, centerY, radius, color);
+            } else {
+                // Default to midpoint if no specific algorithm is matched
+                circle.DrawCircleMidpoint(centerX, centerY, radius, color);
+            }
+        } else {
+            // For thicker lines, use GDI with NULL_BRUSH for better control
+            HPEN hPen = CreatePen(PS_SOLID, thickness, color);
+            HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+            HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+            
+            // Draw just the outline
+            Ellipse(hdc, centerX - radius, centerY - radius, centerX + radius, centerY + radius);
+            
+            // Clean up
+            SelectObject(hdc, hOldPen);
+            SelectObject(hdc, hOldBrush);
+            DeleteObject(hPen);
+        }
     }
 }
 
@@ -1515,83 +1473,41 @@ void DrawEllipse(HDC hdc, int centerX, int centerY, int radiusX, int radiusY, CO
     OutputDebugStringW(debugMsg);
     
     if (filled) {
-        OutputDebugStringW(L"[DEBUG] Using custom ellipse fill method");
+        // Use custom filling instead of GDI
+        OutputDebugStringW(L"[DEBUG] Using custom fill for ellipse");
         
-        // Draw the ellipse using scan line algorithm
-        
-        // First handle the outline
-        // Draw the ellipse outline using parametric approach
-        const int numPoints = 72; // Number of points to create a smooth ellipse
-        double angleStep = 2.0 * M_PI / numPoints;
-        POINT prevPoint;
-        
-        // Set pen for outline
+        // First draw the ellipse outline
         HPEN hPen = CreatePen(PS_SOLID, 1, color);
         HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
-        
-        // Draw the outline
-        for (int i = 0; i <= numPoints; i++) {
-            double angle = i * angleStep;
-            int x = centerX + (int)(radiusX * cos(angle));
-            int y = centerY + (int)(radiusY * sin(angle));
-            
-            if (i == 0) {
-                MoveToEx(hdc, x, y, NULL);
-                prevPoint.x = x;
-                prevPoint.y = y;
-            } else {
-                LineTo(hdc, x, y);
-            }
-        }
+        HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+        Ellipse(hdc, centerX - radiusX, centerY - radiusY, centerX + radiusX, centerY + radiusY);
+        SelectObject(hdc, hOldPen);
+        SelectObject(hdc, hOldBrush);
+        DeleteObject(hPen);
         
         // Fill the ellipse using horizontal scan lines
         for (int y = centerY - radiusY; y <= centerY + radiusY; y++) {
             // Calculate the horizontal span at this y-coordinate using the ellipse formula
-            // (x/a)² + (y/b)² = 1 -> x = a * sqrt(1 - (y/b)²)
             int dy = y - centerY;
-            double factor = 1.0 - ((double)(dy * dy)) / (radiusY * radiusY);
-            
-            // Skip if outside the ellipse
-            if (factor < 0) continue;
-            
-            double dx = radiusX * sqrt(factor);
+            double dx = radiusX * sqrt(1.0 - ((double)(dy * dy)) / (radiusY * radiusY));
             int leftX = (int)(centerX - dx);
             int rightX = (int)(centerX + dx);
             
-            // Draw the horizontal line using our custom line drawing method
+            // Draw the horizontal line
             DrawLineDDA(hdc, leftX, y, rightX, y, color);
         }
-        
-        // Clean up outline pen
-        SelectObject(hdc, hOldPen);
-        DeleteObject(hPen);
     } else {
-        // For outline only, use parametric approach
-        const int numPoints = 72; // Number of points to create a smooth ellipse
-        double angleStep = 2.0 * M_PI / numPoints;
-        POINT prevPoint;
-        
-        // Set pen for outline with specified thickness
+        // For outline only, use specified thickness
         HPEN hPen = CreatePen(PS_SOLID, thickness, color);
         HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+        HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
         
-        // Draw the outline
-        for (int i = 0; i <= numPoints; i++) {
-            double angle = i * angleStep;
-            int x = centerX + (int)(radiusX * cos(angle));
-            int y = centerY + (int)(radiusY * sin(angle));
-            
-            if (i == 0) {
-                MoveToEx(hdc, x, y, NULL);
-                prevPoint.x = x;
-                prevPoint.y = y;
-            } else {
-                LineTo(hdc, x, y);
-            }
-        }
+        // Use GDI Ellipse function to draw just the outline
+        Ellipse(hdc, centerX - radiusX, centerY - radiusY, centerX + radiusX, centerY + radiusY);
         
         // Clean up
         SelectObject(hdc, hOldPen);
+        SelectObject(hdc, hOldBrush);
         DeleteObject(hPen);
     }
 }
@@ -2283,14 +2199,24 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         g_isFilled = (isChecked == TRUE);
                         g_polyFillEnabled = (isChecked == TRUE);
                         
-                        // Output debug message to verify checkbox state
+                        // Debug output
                         wchar_t debugMsg[256];
-                        _snwprintf(debugMsg, 256, L"[DEBUG] Fill checkbox clicked. isChecked=%d, g_isFilled=%d", 
-                                   isChecked, g_isFilled);
+                        _snwprintf(debugMsg, 256, L"[DEBUG] Fill checkbox clicked - new state: %s, g_isFilled=%s, g_polyFillEnabled=%s", 
+                                 isChecked ? L"CHECKED" : L"UNCHECKED",
+                                 g_isFilled ? L"TRUE" : L"FALSE",
+                                 g_polyFillEnabled ? L"TRUE" : L"FALSE");
                         OutputDebugStringW(debugMsg);
                         
-                        // Force a redraw of the current drawing
+                        // Force a redraw to reflect changes immediately
                         InvalidateRect(hwnd, NULL, TRUE);
+                        
+                        // Update status bar with clear message
+                        wchar_t statusText[256];
+                        _snwprintf(statusText, 256, L"Fill option %s - shapes will %sbe filled", 
+                                 isChecked ? L"enabled" : L"disabled",
+                                 isChecked ? L"" : L"not ");
+                        UpdateStatusBar(statusText);
+                        
                         return 0;
                     }
                     break;
@@ -2688,24 +2614,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                             return 0;
                         }
                         
-                        OutputDebugStringW(L"[DEBUG] Using GDI ExtFloodFill for reliable filling");
-                        
-                        // Use Windows GDI's ExtFloodFill function
-                        BOOL result = ExtFloodFill(g_hdcMem, x, y, targetColor, FLOODFILLSURFACE);
-                        
-                        if (!result) {
-                            // If ExtFloodFill fails, try with simpler approach
-                            OutputDebugStringW(L"[DEBUG] ExtFloodFill failed, using simpler method");
-                            
-                            // Create a solid brush with the current color
-                            HBRUSH hBrush = CreateSolidBrush(g_currentColor);
-                            
-                            // Simple approach: just fill the boundary defined by the target color
-                            FloodFill(g_hdcMem, x, y, targetColor);
-                            
-                            // Clean up
-                            DeleteObject(hBrush);
-                        }
+                        // Use the safer queue-based flood fill
+                        myFloodFillQueue(g_hdcMem, x, y, targetColor, g_currentColor);
                         
                         // Update the canvas
                         InvalidateRect(hwnd, &g_canvasRect, FALSE);
@@ -2908,47 +2818,80 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                               g_polyFillEnabled ? L"TRUE" : L"FALSE");
                     OutputDebugStringW(debugMsg);
                     
-                    // Convert vector of points to array for GDI
+                    // Create array of points for GDI
                     POINT* points = new POINT[g_polygonPoints.size()];
                     for (size_t i = 0; i < g_polygonPoints.size(); i++) {
                         points[i] = g_polygonPoints[i];
                     }
                     
                     if (isChecked) {
-                        // FILL THE POLYGON using standard GDI
-                        OutputDebugStringW(L"[DEBUG] Drawing filled polygon with GDI");
+                        // FILL THE POLYGON - Use custom fill methods
+                        OutputDebugStringW(L"[DEBUG] Drawing filled polygon with custom methods");
                         
-                        // Create a solid brush with the current color
-                        HBRUSH hBrush = CreateSolidBrush(g_currentColor);
-                        HBRUSH hOldBrush = (HBRUSH)SelectObject(g_hdcMem, hBrush);
+                        // Convert POINT array to point array for custom fill functions
+                        point* customPoints = new point[g_polygonPoints.size()];
+                        for (size_t i = 0; i < g_polygonPoints.size(); i++) {
+                            customPoints[i] = point(g_polygonPoints[i].x, g_polygonPoints[i].y);
+                        }
                         
-                        // Create a pen for the outline
-                        HPEN hPen = CreatePen(PS_SOLID, g_lineThickness, g_currentColor);
-                        HPEN hOldPen = (HPEN)SelectObject(g_hdcMem, hPen);
+                        // Determine if the polygon is convex
+                        std::vector<point> pointsVector;
+                        for (size_t i = 0; i < g_polygonPoints.size(); i++) {
+                            pointsVector.push_back(point(g_polygonPoints[i].x, g_polygonPoints[i].y));
+                        }
                         
-                        // Draw the filled polygon
-                        Polygon(g_hdcMem, points, (int)g_polygonPoints.size());
+                        // Fill using the appropriate method
+                        if (g_polyFillMethod == 0 || IsPolygonConvex(pointsVector)) {
+                            // Use convex fill method
+                            convexfill(g_hdcMem, customPoints, (int)g_polygonPoints.size(), g_currentColor);
+                            OutputDebugStringW(L"[DEBUG] Used convex fill method");
+                        } else if (g_polyFillMethod == 1) {
+                            // Use general (non-convex) fill method
+                            fillGeneralPolygon(g_hdcMem, customPoints, (int)g_polygonPoints.size(), g_currentColor);
+                            OutputDebugStringW(L"[DEBUG] Used general polygon fill method");
+                        } else {
+                            // Use GDI Polygon as fallback but just for the outline
+                            HPEN hPen = CreatePen(PS_SOLID, g_lineThickness, g_currentColor);
+                            HPEN hOldPen = (HPEN)SelectObject(g_hdcMem, hPen);
+                            HBRUSH hOldBrush = (HBRUSH)SelectObject(g_hdcMem, GetStockObject(NULL_BRUSH));
+                            
+                            Polygon(g_hdcMem, points, (int)g_polygonPoints.size());
+                            
+                            SelectObject(g_hdcMem, hOldBrush);
+                            SelectObject(g_hdcMem, hOldPen);
+                            DeleteObject(hPen);
+                            
+                            // Get the center point to use for flood fill
+                            int centerX = 0, centerY = 0;
+                            for (size_t i = 0; i < g_polygonPoints.size(); i++) {
+                                centerX += g_polygonPoints[i].x;
+                                centerY += g_polygonPoints[i].y;
+                            }
+                            centerX /= g_polygonPoints.size();
+                            centerY /= g_polygonPoints.size();
+                            
+                            // Use flood fill
+                            myFloodFillQueue(g_hdcMem, centerX, centerY, GetPixel(g_hdcMem, centerX, centerY), g_currentColor);
+                            OutputDebugStringW(L"[DEBUG] Used flood fill method");
+                        }
                         
-                        // Restore original GDI objects
-                        SelectObject(g_hdcMem, hOldBrush);
-                        SelectObject(g_hdcMem, hOldPen);
-                        DeleteObject(hBrush);
-                        DeleteObject(hPen);
+                        // Clean up
+                        delete[] customPoints;
                     } else {
-                        // DRAW JUST THE OUTLINE
+                        // DRAW JUST THE OUTLINE - Direct GDI approach
                         OutputDebugStringW(L"[DEBUG] Drawing polygon outline with GDI");
                         
-                        // Create a solid pen with the current color
+                        // Create and select a null brush (transparent)
+                        HBRUSH hOldBrush = (HBRUSH)SelectObject(g_hdcMem, GetStockObject(NULL_BRUSH));
+                        
+                        // Create and select a pen for the outline
                         HPEN hPen = CreatePen(PS_SOLID, g_lineThickness, g_currentColor);
                         HPEN hOldPen = (HPEN)SelectObject(g_hdcMem, hPen);
-                        
-                        // Use NULL_BRUSH for transparent fill
-                        HBRUSH hOldBrush = (HBRUSH)SelectObject(g_hdcMem, GetStockObject(NULL_BRUSH));
                         
                         // Draw the polygon outline
                         Polygon(g_hdcMem, points, (int)g_polygonPoints.size());
                         
-                        // Restore original GDI objects
+                        // Clean up GDI objects
                         SelectObject(g_hdcMem, hOldBrush);
                         SelectObject(g_hdcMem, hOldPen);
                         DeleteObject(hPen);
@@ -3233,8 +3176,8 @@ void fillGeneralPolygon(HDC hdc, point p[], int n, COLORREF c) {
         }
 
         // Strict bounds checking to prevent array out-of-bounds
-        minY = std::max(0, minY);
-        maxY = std::min(2000, maxY);  // Safe upper limit below the 3000 edge table size
+        minY = MAX(0, minY);
+        maxY = MIN(2000, maxY);  // Safe upper limit below the 3000 edge table size
 
         // For each scan line
         for (int y = minY; y <= maxY; y++) {
@@ -3274,8 +3217,8 @@ void fillGeneralPolygon(HDC hdc, point p[], int n, COLORREF c) {
                 // Fill between pairs of intersections
                 for (size_t i = 0; i < intersections.size() - 1; i += 2) {
                     if (i + 1 < intersections.size()) {
-                        int left = std::max(0, intersections[i]);
-                        int right = std::min(5000, intersections[i + 1]);
+                        int left = MAX(0, intersections[i]);
+                        int right = MIN(5000, intersections[i + 1]);
                         
                         if (left < right) {
                             // Draw the horizontal span
@@ -3340,18 +3283,12 @@ void DrawCirclePoints(HDC hdc, int centerX, int centerY, int x, int y, COLORREF 
     SetPixel(hdc, centerX - y, centerY - x, color);
 }
 
-// Function to fill a circle using horizontal scan lines
+// Add a new function to fill a circle
 void FillCircle(HDC hdc, int centerX, int centerY, int radius, COLORREF color) {
-    // Bounds checking to avoid overflow
-    if (radius <= 0 || centerX < -radius || centerY < -radius || centerX > 10000 || centerY > 10000) {
-        return;
-    }
-    
     // Fill the circle using horizontal scan lines
     for (int y = centerY - radius; y <= centerY + radius; y++) {
-        // For each scan line, calculate the width at this y-level
+        // Calculate the horizontal span at this y-coordinate
         int dy = y - centerY;
-        // Using the circle equation x^2 + y^2 = r^2 to find the horizontal width
         int dx = (int)sqrt(radius * radius - dy * dy);
         
         // Draw a horizontal line from left to right edge of the circle

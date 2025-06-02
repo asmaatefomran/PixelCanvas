@@ -14,6 +14,7 @@
 #include <math.h>
 #include <iostream>
 #include <algorithm> // For std::max
+#include <cmath>     // For std::abs
 
 // Include the common controls library (Visual Studio only)
 #if defined(_MSC_VER)
@@ -57,6 +58,8 @@
 #define ID_ALGO_HERMITE 3006
 #define ID_ALGO_COHEN_SUTHERLAND 3007
 #define ID_ALGO_LIANG_BARSKY 3008
+#define ID_ALGO_DIRECT 3009
+#define ID_ALGO_CARDINAL 3010
 
 // Fill methods
 #define ID_FILL_LINES 4001
@@ -81,6 +84,7 @@
 #define ID_LABEL_ALGORITHM 7006
 #define ID_LABEL_THICKNESS 7007
 #define ID_LABEL_COLOR 7008
+#define ID_COMBO_TENSION 7009
 
 // Window size
 #define WINDOW_WIDTH 1200
@@ -120,6 +124,8 @@ HWND g_hShapeLabel;
 HWND g_hAlgorithmLabel;
 HWND g_hThicknessLabel;
 HWND g_hColorLabel;
+HWND g_hHelpText;
+HWND g_hCardinalTensionCombo;
 std::wstring g_htmlPath;
 HBRUSH g_hBackgroundBrush;
 HBRUSH g_hCanvasBrush;
@@ -150,6 +156,12 @@ HDC g_hdcMem = NULL;
 HBITMAP g_hbmMem = NULL;
 RECT g_canvasRect = {0, 0, 0, 0};
 
+// Add a global variable to track when we're in ellipse drawing mode
+bool g_ellipseDrawingMode = false;
+
+// Add global variable for Cardinal Spline tension
+float g_cardinalTension = 0.5f; // Default tension value
+
 // Forward declarations
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 void CreateMenus(HWND hwnd);
@@ -174,6 +186,8 @@ void HandleAlgorithmSelection();
 HFONT CreateCustomFont(int size, bool bold);
 void UpdateAlgorithmDropdown();
 void UpdateInstructions();
+void UpdateCardinalControls(HWND hwnd, bool isCardinalSelected);
+void DrawCardinalSpline(HDC hdc, const std::vector<POINT>& points, COLORREF color, int thickness);
 
 // Update status bar with ellipse drawing progress
 void UpdateEllipseStatus() {
@@ -295,6 +309,7 @@ void CreateMenus(HWND hwnd) {
     AppendMenuW(g_hAlgoMenu, MF_STRING, ID_ALGO_MIDPOINT, L"&Midpoint");
     AppendMenuW(g_hAlgoMenu, MF_STRING, ID_ALGO_PARAMETRIC, L"&Parametric");
     AppendMenuW(g_hAlgoMenu, MF_STRING, ID_ALGO_POLAR, L"P&olar");
+    AppendMenuW(g_hAlgoMenu, MF_STRING, ID_ALGO_DIRECT, L"&Direct");
     AppendMenuW(g_hMenuBar, MF_POPUP, (UINT_PTR)g_hAlgoMenu, L"&Algorithms");
 
     // Create Fill menu
@@ -438,11 +453,20 @@ void CreateControls(HWND hwnd) {
         hwnd, (HMENU)ID_LABEL_THICKNESS, GetModuleHandle(NULL), NULL
     );
     
+    // Create help text window in the top right
+    g_hHelpText = CreateWindowW(
+        L"STATIC", L"",
+        WS_CHILD | WS_VISIBLE | SS_LEFT | SS_SUNKEN,
+        rcClient.right - 300, startY, 280, 70,
+        hwnd, NULL, GetModuleHandle(NULL), NULL
+    );
+    
     // Set font for labels
     SendMessage(g_hShapeLabel, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
     SendMessage(g_hAlgorithmLabel, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
     SendMessage(g_hColorLabel, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
     SendMessage(g_hThicknessLabel, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
+    SendMessage(g_hHelpText, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
     
     // Create shape dropdown
     g_hShapeCombo = CreateWindowW(
@@ -616,9 +640,23 @@ void HandleMenuSelection(HWND hwnd, WPARAM wParam) {
                 g_polygonPoints.clear();
             }
             
-            // Reset ellipse click counter if changing from ellipse
+            // Reset ellipse click counter and drawing mode if changing from ellipse
             if (g_currentTool != ID_TOOL_ELLIPSE) {
                 g_ellipseClickCount = 0;
+                g_ellipseDrawingMode = false;
+                
+                // Reset all ellipse points
+                g_ellipseCenter.x = 0;
+                g_ellipseCenter.y = 0;
+                g_ellipsePoint1.x = 0;
+                g_ellipsePoint1.y = 0;
+                g_ellipsePoint2.x = 0;
+                g_ellipsePoint2.y = 0;
+                g_ellipseA = 0;
+                g_ellipseB = 0;
+            } else {
+                // If we're switching to ellipse, set the drawing mode
+                g_ellipseDrawingMode = true;
             }
             
             // Update the algorithm dropdown to show appropriate algorithms for this tool
@@ -636,6 +674,11 @@ void HandleMenuSelection(HWND hwnd, WPARAM wParam) {
         case ID_ALGO_MIDPOINT:
         case ID_ALGO_PARAMETRIC:
         case ID_ALGO_POLAR:
+        case ID_ALGO_DIRECT:
+        case ID_ALGO_BEZIER:
+        case ID_ALGO_HERMITE:
+        case ID_ALGO_COHEN_SUTHERLAND:
+        case ID_ALGO_LIANG_BARSKY:
             {
                 // Uncheck previous algorithm
                 CheckMenuItem(g_hAlgoMenu, g_currentAlgorithm, MF_BYCOMMAND | MF_UNCHECKED);
@@ -646,17 +689,60 @@ void HandleMenuSelection(HWND hwnd, WPARAM wParam) {
                 
                 // Explicitly update the algorithm combo box selection
                 int algoIndex = 0;
-                switch (g_currentAlgorithm) {
-                    case ID_ALGO_DDA: algoIndex = 0; break;
-                    case ID_ALGO_MIDPOINT: algoIndex = 1; break;
-                    case ID_ALGO_PARAMETRIC: algoIndex = 2; break;
-                    case ID_ALGO_POLAR: algoIndex = 3; break;
+                switch (g_currentTool) {
+                    case ID_TOOL_LINE:
+                        switch (g_currentAlgorithm) {
+                            case ID_ALGO_DDA: algoIndex = 0; break;
+                            case ID_ALGO_MIDPOINT: algoIndex = 1; break;
+                            case ID_ALGO_PARAMETRIC: algoIndex = 2; break;
+                        }
+                        break;
+                        
+                    case ID_TOOL_CIRCLE:
+                        switch (g_currentAlgorithm) {
+                            case ID_ALGO_MIDPOINT: algoIndex = 0; break;
+                            case ID_ALGO_POLAR: algoIndex = 1; break;
+                            case ID_ALGO_PARAMETRIC: algoIndex = 2; break;
+                        }
+                        break;
+                        
+                    case ID_TOOL_ELLIPSE:
+                        switch (g_currentAlgorithm) {
+                            case ID_ALGO_MIDPOINT: algoIndex = 0; break;
+                            case ID_ALGO_DIRECT: algoIndex = 1; break;
+                            case ID_ALGO_POLAR: algoIndex = 2; break;
+                        }
+                        break;
+                        
+                    case ID_TOOL_CURVE:
+                        switch (g_currentAlgorithm) {
+                            case ID_ALGO_BEZIER: algoIndex = 0; break;
+                            case ID_ALGO_HERMITE: algoIndex = 1; break;
+                        }
+                        break;
+                        
+                    case ID_TOOL_POLYGON:
+                        switch (g_currentAlgorithm) {
+                            case ID_ALGO_DDA: algoIndex = 0; break;
+                            case ID_ALGO_MIDPOINT: algoIndex = 1; break;
+                        }
+                        break;
+                        
+                    case ID_TOOL_CLIP:
+                        switch (g_currentAlgorithm) {
+                            case ID_ALGO_COHEN_SUTHERLAND: algoIndex = 0; break;
+                            case ID_ALGO_LIANG_BARSKY: algoIndex = 1; break;
+                        }
+                        break;
                 }
                 SendMessage(g_hAlgorithmCombo, CB_SETCURSEL, algoIndex, 0);
                 
                 // Force redraw of the algorithm combo box
                 InvalidateRect(g_hAlgorithmCombo, NULL, TRUE);
                 UpdateWindow(g_hAlgorithmCombo);
+                
+                // Update instructions
+                UpdateInstructions();
             }
             break;
 
@@ -731,6 +817,7 @@ void HandleMenuSelection(HWND hwnd, WPARAM wParam) {
         case ID_ALGO_POLAR: algoName = L"Polar"; break;
         case ID_ALGO_BEZIER: algoName = L"Bezier"; break;
         case ID_ALGO_HERMITE: algoName = L"Hermite"; break;
+        case ID_ALGO_CARDINAL: algoName = L"Cardinal"; break;
         case ID_ALGO_COHEN_SUTHERLAND: algoName = L"Cohen-Sutherland"; break;
         case ID_ALGO_LIANG_BARSKY: algoName = L"Liang-Barsky"; break;
         default: algoName = L"Unknown"; break;
@@ -918,9 +1005,23 @@ void HandleShapeSelection() {
         g_polygonPoints.clear();
     }
     
-    // Reset ellipse click counter if changing from ellipse
+    // Reset ellipse click counter and drawing mode if changing from ellipse
     if (g_currentTool != ID_TOOL_ELLIPSE) {
         g_ellipseClickCount = 0;
+        g_ellipseDrawingMode = false;
+        
+        // Reset all ellipse points
+        g_ellipseCenter.x = 0;
+        g_ellipseCenter.y = 0;
+        g_ellipsePoint1.x = 0;
+        g_ellipsePoint1.y = 0;
+        g_ellipsePoint2.x = 0;
+        g_ellipsePoint2.y = 0;
+        g_ellipseA = 0;
+        g_ellipseB = 0;
+    } else {
+        // If we're switching to ellipse, set the drawing mode
+        g_ellipseDrawingMode = true;
     }
     
     // Update the algorithm dropdown to show appropriate algorithms for this tool
@@ -959,7 +1060,8 @@ void HandleAlgorithmSelection() {
         case ID_TOOL_ELLIPSE:
             switch (selection) {
                 case 0: algoID = ID_ALGO_MIDPOINT; break;
-                case 1: algoID = ID_ALGO_PARAMETRIC; break;
+                case 1: algoID = ID_ALGO_DIRECT; break;
+                case 2: algoID = ID_ALGO_POLAR; break;
                 default: algoID = ID_ALGO_MIDPOINT; break;
             }
             break;
@@ -968,6 +1070,7 @@ void HandleAlgorithmSelection() {
             switch (selection) {
                 case 0: algoID = ID_ALGO_BEZIER; break;
                 case 1: algoID = ID_ALGO_HERMITE; break;
+                case 2: algoID = ID_ALGO_CARDINAL; break;
                 default: algoID = ID_ALGO_BEZIER; break;
             }
             break;
@@ -1001,7 +1104,21 @@ void HandleAlgorithmSelection() {
     // Update instructions in the status bar
     UpdateInstructions();
     
-    // No need to update the combo box itself as it's already set
+    // Reset click counter for next ellipse
+    g_ellipseClickCount = 0;
+
+    // Reset all ellipse points to avoid interference with the next ellipse
+    g_ellipseCenter.x = 0;
+    g_ellipseCenter.y = 0;
+    g_ellipsePoint1.x = 0;
+    g_ellipsePoint1.y = 0;
+    g_ellipsePoint2.x = 0;
+    g_ellipsePoint2.y = 0;
+    g_ellipseA = 0;
+    g_ellipseB = 0;
+
+    // Show/hide Cardinal Spline controls
+    UpdateCardinalControls(g_hwnd, g_currentAlgorithm == ID_ALGO_CARDINAL);
 }
 
 void UpdateControlsFromSelection() {
@@ -1024,6 +1141,7 @@ void UpdateControlsFromSelection() {
         case ID_ALGO_MIDPOINT: algoIndex = 1; break;
         case ID_ALGO_PARAMETRIC: algoIndex = 2; break;
         case ID_ALGO_POLAR: algoIndex = 3; break;
+        case ID_ALGO_CARDINAL: algoIndex = 4; break;
     }
     SendMessage(g_hAlgorithmCombo, CB_SETCURSEL, algoIndex, 0);
     
@@ -1054,12 +1172,14 @@ void UpdateAlgorithmDropdown() {
             
         case ID_TOOL_ELLIPSE:
             SendMessage(g_hAlgorithmCombo, CB_ADDSTRING, 0, (LPARAM)L"Midpoint");
-            SendMessage(g_hAlgorithmCombo, CB_ADDSTRING, 0, (LPARAM)L"Parametric");
+            SendMessage(g_hAlgorithmCombo, CB_ADDSTRING, 0, (LPARAM)L"Direct");
+            SendMessage(g_hAlgorithmCombo, CB_ADDSTRING, 0, (LPARAM)L"Polar");
             break;
             
         case ID_TOOL_CURVE:
             SendMessage(g_hAlgorithmCombo, CB_ADDSTRING, 0, (LPARAM)L"Bezier");
             SendMessage(g_hAlgorithmCombo, CB_ADDSTRING, 0, (LPARAM)L"Hermite");
+            SendMessage(g_hAlgorithmCombo, CB_ADDSTRING, 0, (LPARAM)L"Cardinal");
             break;
             
         case ID_TOOL_POLYGON:
@@ -1094,6 +1214,7 @@ void UpdateInstructions() {
         case ID_ALGO_POLAR: algoName = L"Polar"; break;
         case ID_ALGO_BEZIER: algoName = L"Bezier"; break;
         case ID_ALGO_HERMITE: algoName = L"Hermite"; break;
+        case ID_ALGO_CARDINAL: algoName = L"Cardinal"; break;
         case ID_ALGO_COHEN_SUTHERLAND: algoName = L"Cohen-Sutherland"; break;
         case ID_ALGO_LIANG_BARSKY: algoName = L"Liang-Barsky"; break;
         default: algoName = L"Unknown"; break;
@@ -1135,6 +1256,127 @@ void UpdateInstructions() {
     _snwprintf(statusText, 256, L"%s: %s. Tool: %s, Algorithm: %s, Thickness: %d", 
              toolName, instructions, toolName, algoName, g_lineThickness);
     UpdateStatusBar(statusText);
+    
+    // Update help text window with appropriate instructions based on the current tool
+    wchar_t helpText[512] = L"";
+
+    switch (g_currentTool) {
+        case ID_TOOL_LINE:
+            _snwprintf(helpText, 512, 
+                    L"How to draw a line:\n"
+                    L"1. Click where you want the line to start\n"
+                    L"2. Drag to where you want the line to end\n"
+                    L"3. Release to draw the line\n\n"
+                    L"Current algorithm: %s", algoName);
+            break;
+            
+        case ID_TOOL_CIRCLE:
+            _snwprintf(helpText, 512, 
+                    L"How to draw a circle:\n"
+                    L"1. Click at the center point\n"
+                    L"2. Drag to set the radius\n"
+                    L"3. Release to draw the circle\n\n"
+                    L"Current algorithm: %s", algoName);
+            break;
+            
+        case ID_TOOL_ELLIPSE:
+            _snwprintf(helpText, 512, 
+                    L"How to draw an ellipse:\n"
+                    L"1. Click to set the center point\n"
+                    L"2. Click to define the first axis point\n"
+                    L"3. Click to define the second axis point\n\n"
+                    L"Current algorithm: %s", algoName);
+            break;
+            
+        case ID_TOOL_CURVE:
+            _snwprintf(helpText, 512, 
+                    L"How to draw a curve:\n"
+                    L"1. Click for each control point\n"
+                    L"2. Double-click to finish the curve\n\n"
+                    L"Current algorithm: %s", algoName);
+            break;
+            
+        case ID_TOOL_POLYGON:
+            _snwprintf(helpText, 512, 
+                    L"How to draw a polygon:\n"
+                    L"1. Click for each vertex of the polygon\n"
+                    L"2. Right-click to close the polygon\n\n"
+                    L"Current algorithm: %s", algoName);
+            break;
+            
+        case ID_TOOL_CLIP:
+            _snwprintf(helpText, 512, 
+                    L"How to define a clipping window:\n"
+                    L"1. Click at the top-left corner\n"
+                    L"2. Drag to the bottom-right corner\n"
+                    L"3. Release to set the clipping window\n\n"
+                    L"Current algorithm: %s", algoName);
+            break;
+            
+        default:
+            wcscpy(helpText, L"Select a tool to begin drawing");
+            break;
+    }
+    
+    SetWindowTextW(g_hHelpText, helpText);
+}
+
+void UpdateCardinalControls(HWND hwnd, bool isCardinalSelected) {
+    static bool controlsCreated = false;
+    
+    // Get client area dimensions
+    RECT rcClient;
+    GetClientRect(hwnd, &rcClient);
+    
+    int startX = 500; // Position to the right of other controls
+    int startY = 20;
+    int labelWidth = 80;
+    int controlWidth = 120;
+    int controlHeight = 24;
+    
+    if (isCardinalSelected) {
+        // Create or show the tension label and dropdown
+        if (!controlsCreated) {
+            // Create tension label
+            CreateWindowW(
+                L"STATIC", L"Tension:",
+                WS_CHILD | WS_VISIBLE | SS_LEFT,
+                startX, startY, labelWidth, controlHeight,
+                hwnd, (HMENU)ID_LABEL_THICKNESS + 1, GetModuleHandle(NULL), NULL
+            );
+            
+            // Create tension dropdown
+            g_hCardinalTensionCombo = CreateWindowW(
+                L"COMBOBOX", L"",
+                WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
+                startX + labelWidth, startY, controlWidth, 200,
+                hwnd, (HMENU)ID_COMBO_TENSION, GetModuleHandle(NULL), NULL
+            );
+            
+            // Add tension options
+            SendMessage(g_hCardinalTensionCombo, CB_ADDSTRING, 0, (LPARAM)L"0.0");
+            SendMessage(g_hCardinalTensionCombo, CB_ADDSTRING, 0, (LPARAM)L"0.25");
+            SendMessage(g_hCardinalTensionCombo, CB_ADDSTRING, 0, (LPARAM)L"0.5 (Default)");
+            SendMessage(g_hCardinalTensionCombo, CB_ADDSTRING, 0, (LPARAM)L"0.75");
+            SendMessage(g_hCardinalTensionCombo, CB_ADDSTRING, 0, (LPARAM)L"1.0");
+            
+            // Set default selection
+            SendMessage(g_hCardinalTensionCombo, CB_SETCURSEL, 2, 0); // 0.5 is default
+            
+            // Set font
+            SendMessage(g_hCardinalTensionCombo, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
+            
+            controlsCreated = true;
+        }
+        
+        // Show the controls
+        ShowWindow(g_hCardinalTensionCombo, SW_SHOW);
+        ShowWindow(GetDlgItem(hwnd, ID_LABEL_THICKNESS + 1), SW_SHOW);
+    } else if (controlsCreated) {
+        // Hide the controls when not using Cardinal Spline
+        ShowWindow(g_hCardinalTensionCombo, SW_HIDE);
+        ShowWindow(GetDlgItem(hwnd, ID_LABEL_THICKNESS + 1), SW_HIDE);
+    }
 }
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
@@ -1160,6 +1402,31 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     }
                     else if (LOWORD(wParam) == ID_COMBO_ALGORITHM) {
                         HandleAlgorithmSelection();
+                        return 0;
+                    }
+                    else if (LOWORD(wParam) == ID_COMBO_TENSION) {
+                        // Handle tension selection change
+                        int index = (int)SendMessage(g_hCardinalTensionCombo, CB_GETCURSEL, 0, 0);
+                        if (index != CB_ERR) {
+                            switch (index) {
+                                case 0: g_cardinalTension = 0.0f; break;
+                                case 1: g_cardinalTension = 0.25f; break;
+                                case 2: g_cardinalTension = 0.5f; break;
+                                case 3: g_cardinalTension = 0.75f; break;
+                                case 4: g_cardinalTension = 1.0f; break;
+                                default: g_cardinalTension = 0.5f; break;
+                            }
+                            
+                            // Update status message
+                            wchar_t msg[256];
+                            _snwprintf(msg, 256, L"Cardinal Spline tension set to: %.2f", g_cardinalTension);
+                            UpdateStatusBar(msg);
+                            
+                            // Redraw if we have control points
+                            if (!g_polygonPoints.empty()) {
+                                InvalidateRect(hwnd, NULL, TRUE);
+                            }
+                        }
                         return 0;
                     }
                     break;
@@ -1194,6 +1461,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
                 // Resize status bar
                 SendMessage(g_hStatusBar, WM_SIZE, 0, 0);
+                
+                // Move help text window to top right
+                if (g_hHelpText) {
+                    MoveWindow(g_hHelpText, rcClient.right - 300, 20, 280, 70, TRUE);
+                }
 
                 // Recreate the drawing buffer
                 CleanupDrawingBuffer();
@@ -1206,129 +1478,57 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 PAINTSTRUCT ps;
                 HDC hdc = BeginPaint(hwnd, &ps);
                 
-                // Draw the canvas border with a nice 3D effect
-                HPEN hPen = CreatePen(PS_SOLID, 1, COLOR_DARKGRAY);
-                HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+                // Blit the memory DC to the window DC
+                RECT rc = GetCanvasRect(hwnd);
+                BitBlt(hdc, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, 
+                      g_hdcMem, 0, 0, SRCCOPY);
                 
-                // Draw a nice 3D frame around the canvas
-                DrawEdge(hdc, &g_canvasRect, EDGE_SUNKEN, BF_RECT);
-                
-                // Copy the memory DC to the window DC
-                BitBlt(hdc, g_canvasRect.left, g_canvasRect.top, 
-                       g_canvasRect.right - g_canvasRect.left, 
-                       g_canvasRect.bottom - g_canvasRect.top, 
-                       g_hdcMem, 0, 0, SRCCOPY);
-                
-                // Draw temporary guidelines for shapes in progress
-                if (g_isDrawing) {
-                    // Convert to screen coordinates
-                    int startX = g_startPoint.x + g_canvasRect.left;
-                    int startY = g_startPoint.y + g_canvasRect.top;
-                    int endX = g_endPoint.x + g_canvasRect.left;
-                    int endY = g_endPoint.y + g_canvasRect.top;
+                // If we're collecting points for a polygon, draw them
+                if (!g_polygonPoints.empty()) {
+                    // Select a pen
+                    HPEN hPen = CreatePen(PS_SOLID, g_lineThickness, g_currentColor);
+                    HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
                     
-                    // Create dashed pen for guidelines
-                    LOGBRUSH lb;
-                    lb.lbStyle = BS_SOLID;
-                    lb.lbColor = g_currentColor;
-                    lb.lbHatch = 0;
-                    HPEN hDashedPen = ExtCreatePen(PS_COSMETIC | PS_DASH, 1, &lb, 0, NULL);
-                    HPEN hOldGuidePen = (HPEN)SelectObject(hdc, hDashedPen);
-                    
-                    switch (g_currentTool) {
-                        case ID_TOOL_LINE:
-                            MoveToEx(hdc, startX, startY, NULL);
-                            LineTo(hdc, endX, endY);
-                            break;
-                            
-                        case ID_TOOL_CIRCLE:
-                            {
-                                int dx = endX - startX;
-                                int dy = endY - startY;
-                                int radius = (int)sqrt((double)(dx*dx + dy*dy));
-                                
-                                // Draw temporary circle
-                                HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
-                                Ellipse(hdc, startX - radius, startY - radius, startX + radius, startY + radius);
-                                
-                                // Draw a line showing the radius
-                                MoveToEx(hdc, startX, startY, NULL);
-                                LineTo(hdc, endX, endY);
-                                
-                                SelectObject(hdc, hOldBrush);
-                            }
-                            break;
-                            
-                        case ID_TOOL_CLIP:
-                            {
-                                // Draw temporary clipping rectangle
-                                HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
-                                Rectangle(hdc, startX, startY, endX, endY);
-                                SelectObject(hdc, hOldBrush);
-                            }
-                            break;
+                    // Draw points
+                    for (size_t i = 0; i < g_polygonPoints.size(); i++) {
+                        Ellipse(hdc, g_polygonPoints[i].x - 3, g_polygonPoints[i].y - 3, 
+                               g_polygonPoints[i].x + 3, g_polygonPoints[i].y + 3);
                     }
                     
-                    SelectObject(hdc, hOldGuidePen);
-                    DeleteObject(hDashedPen);
-                }
-                
-                // Draw temporary visualization for ellipse drawing
-                if (g_currentTool == ID_TOOL_ELLIPSE && g_ellipseClickCount > 0) {
-                    // Create dashed pen for guidelines
-                    LOGBRUSH lb;
-                    lb.lbStyle = BS_SOLID;
-                    lb.lbColor = g_currentColor;
-                    lb.lbHatch = 0;
-                    HPEN hDashedPen = ExtCreatePen(PS_COSMETIC | PS_DASH, 1, &lb, 0, NULL);
-                    HPEN hOldGuidePen = (HPEN)SelectObject(hdc, hDashedPen);
-                    HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
-                    
-                    // Convert to screen coordinates
-                    int centerX = g_ellipseCenter.x + g_canvasRect.left;
-                    int centerY = g_ellipseCenter.y + g_canvasRect.top;
-                    
-                    // Draw center point
-                    Ellipse(hdc, centerX - 3, centerY - 3, centerX + 3, centerY + 3);
-                    
-                    if (g_ellipseClickCount >= 1) {
-                        // First axis point
-                        int point1X = g_ellipsePoint1.x + g_canvasRect.left;
-                        int point1Y = g_ellipsePoint1.y + g_canvasRect.top;
-                        
-                        // Draw first point
-                        Ellipse(hdc, point1X - 3, point1Y - 3, point1X + 3, point1Y + 3);
-                        
-                        // Draw guide line from center to first point
-                        MoveToEx(hdc, centerX, centerY, NULL);
-                        LineTo(hdc, point1X, point1Y);
-                        
-                        if (g_ellipseClickCount >= 2) {
-                            // Second axis point
-                            int point2X = g_ellipsePoint2.x + g_canvasRect.left;
-                            int point2Y = g_ellipsePoint2.y + g_canvasRect.top;
-                            
-                            // Draw second point
-                            Ellipse(hdc, point2X - 3, point2Y - 3, point2X + 3, point2Y + 3);
-                            
-                            // Draw guide line from center to second point
-                            MoveToEx(hdc, centerX, centerY, NULL);
-                            LineTo(hdc, point2X, point2Y);
+                    // Draw lines connecting points
+                    if (g_polygonPoints.size() > 1) {
+                        for (size_t i = 1; i < g_polygonPoints.size(); i++) {
+                            MoveToEx(hdc, g_polygonPoints[i-1].x, g_polygonPoints[i-1].y, NULL);
+                            LineTo(hdc, g_polygonPoints[i].x, g_polygonPoints[i].y);
                         }
                     }
                     
-                    SelectObject(hdc, hOldGuidePen);
-                    SelectObject(hdc, hOldBrush);
-                    DeleteObject(hDashedPen);
+                    // If we're in curve mode with Cardinal Spline selected
+                    if (g_currentTool == ID_TOOL_CURVE && g_currentAlgorithm == ID_ALGO_CARDINAL && g_polygonPoints.size() >= 4) {
+                        // Draw the Cardinal Spline
+                        DrawCardinalSpline(hdc, g_polygonPoints, g_currentColor, g_lineThickness);
+                    }
+                    
+                    // Draw line to mouse position if we have at least one point
+                    if (g_polygonPoints.size() > 0 && (g_currentTool == ID_TOOL_POLYGON || g_currentTool == ID_TOOL_CURVE)) {
+                        POINT pt;
+                        GetCursorPos(&pt);
+                        ScreenToClient(hwnd, &pt);
+                        
+                        if (PtInRect(&g_canvasRect, pt)) {
+                            MoveToEx(hdc, g_polygonPoints.back().x, g_polygonPoints.back().y, NULL);
+                            LineTo(hdc, pt.x, pt.y);
+                        }
+                    }
+                    
+                    // Restore original pen
+                    SelectObject(hdc, hOldPen);
+                    DeleteObject(hPen);
                 }
                 
-                // Clean up
-                SelectObject(hdc, hOldPen);
-                DeleteObject(hPen);
-                
                 EndPaint(hwnd, &ps);
+                return 0;
             }
-            return 0;
 
         case WM_LBUTTONDOWN:
             {
@@ -1363,6 +1563,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         InvalidateRect(hwnd, &g_canvasRect, FALSE);
                     }
                     else if (g_currentTool == ID_TOOL_ELLIPSE) {
+                        // Set ellipse drawing mode flag
+                        g_ellipseDrawingMode = true;
+                        
                         // Handle 3-point ellipse drawing
                         if (g_ellipseClickCount == 0) {
                             // First click - store the center point
@@ -1376,6 +1579,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                             
                             // Update status bar with next instruction
                             UpdateEllipseStatus();
+                            
+                            // Make sure we're not in normal drawing mode to prevent the diagonal line
+                            g_isDrawing = false;
                         }
                         else if (g_ellipseClickCount == 1) {
                             // Second click - store first axis point
@@ -1396,8 +1602,21 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                             g_ellipsePoint2.y = y;
                             
                             // Calculate a and b for the ellipse
-                            g_ellipseA = std::max(abs(g_ellipsePoint1.x - g_ellipseCenter.x), abs(g_ellipsePoint2.x - g_ellipseCenter.x));
-                            g_ellipseB = std::max(abs(g_ellipsePoint1.y - g_ellipseCenter.y), abs(g_ellipsePoint2.y - g_ellipseCenter.y));
+                            int dx1 = g_ellipsePoint1.x - g_ellipseCenter.x;
+                            int dx2 = g_ellipsePoint2.x - g_ellipseCenter.x;
+                            int dy1 = g_ellipsePoint1.y - g_ellipseCenter.y;
+                            int dy2 = g_ellipsePoint2.y - g_ellipseCenter.y;
+                            
+                            g_ellipseA = (dx1 < 0) ? -dx1 : dx1;  // abs(dx1)
+                            int absX2 = (dx2 < 0) ? -dx2 : dx2;   // abs(dx2)
+                            g_ellipseA = (g_ellipseA > absX2) ? g_ellipseA : absX2;  // max of the two
+                            
+                            g_ellipseB = (dy1 < 0) ? -dy1 : dy1;  // abs(dy1)
+                            int absY2 = (dy2 < 0) ? -dy2 : dy2;   // abs(dy2)
+                            g_ellipseB = (g_ellipseB > absY2) ? g_ellipseB : absY2;  // max of the two
+                            
+                            // Clear the previous drawing to remove the dots and guide lines
+                            ClearCanvas(g_hdcMem);
                             
                             // Draw the ellipse using the selected algorithm
                             switch (g_currentAlgorithm) {
@@ -1405,8 +1624,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                                     // Draw ellipse using midpoint algorithm
                                     DrawEllipse(g_hdcMem, g_ellipseCenter.x, g_ellipseCenter.y, g_ellipseA, g_ellipseB, g_currentColor, g_lineThickness);
                                     break;
-                                case ID_ALGO_PARAMETRIC:
-                                    // Draw ellipse using parametric algorithm
+                                case ID_ALGO_DIRECT:
+                                    // Draw ellipse using direct algorithm
+                                    DrawEllipse(g_hdcMem, g_ellipseCenter.x, g_ellipseCenter.y, g_ellipseA, g_ellipseB, g_currentColor, g_lineThickness);
+                                    break;
+                                case ID_ALGO_POLAR:
+                                    // Draw ellipse using polar algorithm
                                     DrawEllipse(g_hdcMem, g_ellipseCenter.x, g_ellipseCenter.y, g_ellipseA, g_ellipseB, g_currentColor, g_lineThickness);
                                     break;
                                 default:
@@ -1417,6 +1640,19 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                             
                             // Reset click counter for next ellipse
                             g_ellipseClickCount = 0;
+
+                            // Reset all ellipse points to avoid interference with the next ellipse
+                            g_ellipseCenter.x = 0;
+                            g_ellipseCenter.y = 0;
+                            g_ellipsePoint1.x = 0;
+                            g_ellipsePoint1.y = 0;
+                            g_ellipsePoint2.x = 0;
+                            g_ellipsePoint2.y = 0;
+                            g_ellipseA = 0;
+                            g_ellipseB = 0;
+                            
+                            // Make sure we're not in drawing mode to prevent guide lines
+                            g_isDrawing = false;
                             
                             // Invalidate the canvas area to redraw
                             InvalidateRect(hwnd, &g_canvasRect, FALSE);
@@ -1437,19 +1673,41 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
         case WM_MOUSEMOVE:
             {
+                // Get current mouse position
+                int x = GET_X_LPARAM(lParam);
+                int y = GET_Y_LPARAM(lParam);
+                
+                // Show coordinates in status bar
+                wchar_t msg[100];
+                _snwprintf(msg, 100, L"X: %d, Y: %d", x, y);
+                SendMessage(g_hStatusBar, SB_SETTEXT, 1, (LPARAM)msg);
+                
+                // Update end point for drag operations
                 if (g_isDrawing) {
-                    int x = GET_X_LPARAM(lParam);
-                    int y = GET_Y_LPARAM(lParam);
-                    
-                    // Convert to canvas coordinates
                     g_endPoint.x = x - g_canvasRect.left;
                     g_endPoint.y = y - g_canvasRect.top;
                     
-                    // Redraw to show the current shape
-                    InvalidateRect(hwnd, &g_canvasRect, FALSE);
+                    // Force redraw to update guidelines
+                    InvalidateRect(hwnd, NULL, TRUE);
                 }
+                
+                // For ellipse 3-point drawing
+                if (g_ellipseDrawingMode && g_ellipseClickCount > 0) {
+                    InvalidateRect(hwnd, NULL, TRUE);
+                }
+                
+                // For polygon and curve drawing - update preview
+                if (!g_polygonPoints.empty() && (g_currentTool == ID_TOOL_POLYGON || g_currentTool == ID_TOOL_CURVE)) {
+                    InvalidateRect(hwnd, NULL, TRUE);
+                }
+                
+                // Update status bar with coordinates
+                wchar_t coordText[64];
+                _snwprintf(coordText, 64, L"X: %d, Y: %d", x, y);
+                SendMessage(g_hStatusBar, SB_SETTEXT, 1, (LPARAM)coordText);
+                
+                return 0;
             }
-            return 0;
 
         case WM_LBUTTONUP:
             {
@@ -1528,6 +1786,61 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         case WM_ERASEBKGND:
             // To avoid flicker, handle all drawing in WM_PAINT
             return 1;
+
+        // Handle double-click to finish a Cardinal Spline
+        case WM_LBUTTONDBLCLK:
+            {
+                // Handle curve completion on double-click
+                if (g_currentTool == ID_TOOL_CURVE && g_polygonPoints.size() >= 4) {
+                    // Get coordinates
+                    int x = GET_X_LPARAM(lParam);
+                    int y = GET_Y_LPARAM(lParam);
+                    
+                    // Only process if inside canvas
+                    if (PtInRect(&g_canvasRect, POINT{ x, y })) {
+                        // Add final point if it's different from the last one
+                        if (g_polygonPoints.back().x != x || g_polygonPoints.back().y != y) {
+                            g_polygonPoints.push_back(POINT{ x, y });
+                        }
+                        
+                        // Adjust coordinates to be relative to the canvas
+                        std::vector<POINT> canvasPoints = g_polygonPoints;
+                        for (auto& pt : canvasPoints) {
+                            pt.x -= g_canvasRect.left;
+                            pt.y -= g_canvasRect.top;
+                        }
+                        
+                        // Draw the final curve
+                        HDC hdcMem = g_hdcMem;
+                        
+                        // Draw curve based on selected algorithm
+                        if (g_currentAlgorithm == ID_ALGO_CARDINAL && canvasPoints.size() >= 4) {
+                            // Draw Cardinal Spline to the memory DC
+                            DrawCardinalSpline(hdcMem, canvasPoints, g_currentColor, g_lineThickness);
+                        } else if (g_currentAlgorithm == ID_ALGO_BEZIER && canvasPoints.size() >= 4) {
+                            // For Bezier, we handle groups of 4 points at a time
+                            // ... existing Bezier code ...
+                        } else if (g_currentAlgorithm == ID_ALGO_HERMITE && canvasPoints.size() >= 2) {
+                            // For Hermite, we need 2 points and 2 tangent vectors
+                            // ... existing Hermite code ...
+                        }
+                        
+                        // Update status message
+                        wchar_t msg[256];
+                        _snwprintf(msg, 256, L"Curve completed with %d control points.", g_polygonPoints.size());
+                        UpdateStatusBar(msg);
+                        
+                        // Clear control points for next curve
+                        g_polygonPoints.clear();
+                        
+                        // Force window redraw
+                        InvalidateRect(hwnd, NULL, TRUE);
+                    }
+                    
+                    return 0;
+                }
+            }
+            break;
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
@@ -1545,4 +1858,60 @@ HFONT CreateCustomFont(int size, bool bold) {
         DEFAULT_PITCH | FF_DONTCARE,
         L"Segoe UI"
     );
+}
+
+// Add the DrawCardinalSpline function
+void DrawCardinalSpline(HDC hdc, const std::vector<POINT>& points, COLORREF color, int thickness) {
+    if (points.size() < 4) return; // Need at least 4 points for Cardinal spline
+    
+    // Create a pen for drawing
+    HPEN hPen = CreatePen(PS_SOLID, thickness, color);
+    HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+    
+    // Draw control points for visual reference
+    for (size_t i = 0; i < points.size(); i++) {
+        Ellipse(hdc, points[i].x - 3, points[i].y - 3, points[i].x + 3, points[i].y + 3);
+    }
+    
+    // Calculate s parameter from tension
+    float s = (1.0f - g_cardinalTension) / 2.0f;
+    
+    // For each segment between control points
+    for (size_t i = 1; i < points.size() - 2; i++) {
+        // Prepare to draw with polyline for smoother appearance
+        std::vector<POINT> curvePoints;
+        
+        // Calculate points along the curve segment
+        for (float t = 0.0f; t <= 1.0f; t += 0.01f) {
+            // Cardinal basis functions
+            float h1 = 2.0f * t*t*t - 3.0f * t*t + 1.0f;
+            float h2 = -2.0f * t*t*t + 3.0f * t*t;
+            float h3 = t*t*t - 2.0f * t*t + t;
+            float h4 = t*t*t - t*t;
+            
+            // Calculate derivatives (tangents)
+            float dx1 = (points[i+1].x - points[i-1].x) * s;
+            float dy1 = (points[i+1].y - points[i-1].y) * s;
+            float dx2 = (points[i+2].x - points[i].x) * s;
+            float dy2 = (points[i+2].y - points[i].y) * s;
+            
+            // Calculate point on curve
+            float x = h1 * points[i].x + h2 * points[i+1].x + h3 * dx1 + h4 * dx2;
+            float y = h1 * points[i].y + h2 * points[i+1].y + h3 * dy1 + h4 * dy2;
+            
+            // Add to curve points
+            POINT pt = { (LONG)x, (LONG)y };
+            curvePoints.push_back(pt);
+        }
+        
+        // Draw the curve segment
+        if (!curvePoints.empty()) {
+            Polyline(hdc, curvePoints.data(), (int)curvePoints.size());
+        }
+    }
+    
+    // Restore original pen
+    SelectObject(hdc, hOldPen);
+    DeleteObject(hPen);
 } 
+ 

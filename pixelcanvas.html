@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>PixelCanvas</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        #canvas {
+            display: block;
+        }
+        .toolbar {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+        }
+        .toolbar button {
+            margin: 2px;
+            padding: 5px 10px;
+            cursor: pointer;
+        }
+        .toolbar button.active {
+            background: #4CAF50;
+            color: white;
+        }
+        .color-picker {
+            display: flex;
+            margin-top: 10px;
+        }
+        .color {
+            width: 20px;
+            height: 20px;
+            margin: 2px;
+            cursor: pointer;
+            border: 1px solid #000;
+        }
+        .color.selected {
+            border: 2px solid white;
+            box-shadow: 0 0 0 1px black;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    
+    <div class="toolbar">
+        <div>
+            <button id="line-dda" class="active">Line DDA</button>
+            <button id="line-midpoint">Line Midpoint</button>
+            <button id="line-parametric">Line Parametric</button>
+        </div>
+        <div>
+            <button id="circle-direct">Circle Direct</button>
+            <button id="circle-midpoint">Circle Midpoint</button>
+            <button id="circle-fill">Circle Fill</button>
+        </div>
+        <div>
+            <button id="clear">Clear</button>
+        </div>
+        <div class="color-picker" id="color-picker"></div>
+    </div>
+
+    <script>
+        // Canvas setup
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Set canvas size to window size
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        
+        // Colors
+        const colors = [
+            '#000000', '#FF0000', '#00FF00', '#0000FF', 
+            '#FFFF00', '#FF00FF', '#00FFFF', '#FF8800',
+            '#8800FF', '#FFFFFF'
+        ];
+        
+        // Drawing state
+        let currentShape = 'line-dda';
+        let currentColor = '#000000';
+        let isDrawing = false;
+        let startPoint = { x: 0, y: 0 };
+        let shapes = [];
+        
+        // Initialize color picker
+        const colorPicker = document.getElementById('color-picker');
+        colors.forEach(color => {
+            const colorElement = document.createElement('div');
+            colorElement.className = 'color';
+            colorElement.style.backgroundColor = color;
+            if (color === currentColor) {
+                colorElement.classList.add('selected');
+            }
+            colorElement.addEventListener('click', () => {
+                document.querySelectorAll('.color').forEach(el => el.classList.remove('selected'));
+                colorElement.classList.add('selected');
+                currentColor = color;
+            });
+            colorPicker.appendChild(colorElement);
+        });
+        
+        // Tool buttons
+        document.querySelectorAll('.toolbar button').forEach(button => {
+            button.addEventListener('click', () => {
+                if (button.id === 'clear') {
+                    shapes = [];
+                    draw();
+                    return;
+                }
+                
+                document.querySelectorAll('.toolbar button').forEach(b => b.classList.remove('active'));
+                button.classList.add('active');
+                currentShape = button.id;
+            });
+        });
+        
+        // Mouse events
+        canvas.addEventListener('mousedown', e => {
+            isDrawing = true;
+            startPoint = { x: e.clientX, y: e.clientY };
+        });
+        
+        canvas.addEventListener('mousemove', e => {
+            if (!isDrawing) return;
+            
+            draw();
+            
+            // Preview current shape
+            const currentPoint = { x: e.clientX, y: e.clientY };
+            
+            if (currentShape.startsWith('line')) {
+                if (currentShape === 'line-dda') {
+                    drawLineDDA(startPoint.x, startPoint.y, currentPoint.x, currentPoint.y, currentColor);
+                } else if (currentShape === 'line-midpoint') {
+                    drawLineMidpoint(startPoint.x, startPoint.y, currentPoint.x, currentPoint.y, currentColor);
+                } else if (currentShape === 'line-parametric') {
+                    drawLineParametric(startPoint.x, startPoint.y, currentPoint.x, currentPoint.y, currentColor);
+                }
+            } else if (currentShape.startsWith('circle')) {
+                const radius = Math.sqrt(
+                    Math.pow(currentPoint.x - startPoint.x, 2) + 
+                    Math.pow(currentPoint.y - startPoint.y, 2)
+                );
+                
+                if (currentShape === 'circle-direct') {
+                    drawCircleDirect(startPoint.x, startPoint.y, radius, currentColor);
+                } else if (currentShape === 'circle-midpoint') {
+                    drawCircleMidpoint(startPoint.x, startPoint.y, radius, currentColor);
+                } else if (currentShape === 'circle-fill') {
+                    drawCircleFill(startPoint.x, startPoint.y, radius, currentColor);
+                }
+            }
+        });
+        
+        canvas.addEventListener('mouseup', e => {
+            if (!isDrawing) return;
+            
+            const endPoint = { x: e.clientX, y: e.clientY };
+            
+            // Add the shape to our list
+            if (currentShape.startsWith('line')) {
+                shapes.push({
+                    type: currentShape,
+                    start: { ...startPoint },
+                    end: { ...endPoint },
+                    color: currentColor
+                });
+            } else if (currentShape.startsWith('circle')) {
+                const radius = Math.sqrt(
+                    Math.pow(endPoint.x - startPoint.x, 2) + 
+                    Math.pow(endPoint.y - startPoint.y, 2)
+                );
+                
+                shapes.push({
+                    type: currentShape,
+                    center: { ...startPoint },
+                    radius,
+                    color: currentColor
+                });
+            }
+            
+            isDrawing = false;
+            draw();
+        });
+        
+        // Drawing algorithms
+        function drawLineDDA(x1, y1, x2, y2, color) {
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+            const steps = Math.max(Math.abs(dx), Math.abs(dy));
+            
+            if (steps === 0) return;
+            
+            const xIncrement = dx / steps;
+            const yIncrement = dy / steps;
+            
+            let x = x1;
+            let y = y1;
+            
+            ctx.fillStyle = color;
+            for (let i = 0; i <= steps; i++) {
+                ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
+                x += xIncrement;
+                y += yIncrement;
+            }
+        }
+        
+        function drawLineMidpoint(x1, y1, x2, y2, color) {
+            let steep = Math.abs(y2 - y1) > Math.abs(x2 - x1);
+            
+            if (steep) {
+                [x1, y1] = [y1, x1];
+                [x2, y2] = [y2, x2];
+            }
+            
+            if (x1 > x2) {
+                [x1, x2] = [x2, x1];
+                [y1, y2] = [y2, y1];
+            }
+            
+            const dx = x2 - x1;
+            const dy = Math.abs(y2 - y1);
+            let d = 2 * dy - dx;
+            const yStep = (y1 < y2) ? 1 : -1;
+            
+            let y = y1;
+            
+            ctx.fillStyle = color;
+            for (let x = x1; x <= x2; x++) {
+                if (steep) {
+                    ctx.fillRect(y, x, 1, 1);
+                } else {
+                    ctx.fillRect(x, y, 1, 1);
+                }
+                
+                if (d > 0) {
+                    y += yStep;
+                    d -= 2 * dx;
+                }
+                
+                d += 2 * dy;
+            }
+        }
+        
+        function drawLineParametric(x1, y1, x2, y2, color) {
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+            const steps = Math.max(Math.abs(dx), Math.abs(dy));
+            
+            if (steps === 0) return;
+            
+            ctx.fillStyle = color;
+            for (let i = 0; i <= steps; i++) {
+                const t = i / steps;
+                const x = Math.round(x1 + dx * t);
+                const y = Math.round(y1 + dy * t);
+                ctx.fillRect(x, y, 1, 1);
+            }
+        }
+        
+        function drawCircleDirect(xc, yc, radius, color) {
+            if (radius <= 0) return;
+            
+            ctx.fillStyle = color;
+            for (let x = 0; x <= radius / Math.sqrt(2); x++) {
+                const y = Math.round(Math.sqrt(radius * radius - x * x));
+                
+                // Draw 8 points for symmetry
+                ctx.fillRect(xc + x, yc + y, 1, 1);
+                ctx.fillRect(xc - x, yc + y, 1, 1);
+                ctx.fillRect(xc + x, yc - y, 1, 1);
+                ctx.fillRect(xc - x, yc - y, 1, 1);
+                ctx.fillRect(xc + y, yc + x, 1, 1);
+                ctx.fillRect(xc - y, yc + x, 1, 1);
+                ctx.fillRect(xc + y, yc - x, 1, 1);
+                ctx.fillRect(xc - y, yc - x, 1, 1);
+            }
+        }
+        
+        function drawCircleMidpoint(xc, yc, radius, color) {
+            if (radius <= 0) return;
+            
+            let x = 0;
+            let y = radius;
+            let d = 1 - radius;
+            
+            ctx.fillStyle = color;
+            // Draw initial point
+            draw8Points(xc, yc, x, y);
+            
+            while (x < y) {
+                if (d < 0) {
+                    d += 2 * x + 3;
+                } else {
+                    d += 2 * (x - y) + 5;
+                    y--;
+                }
+                x++;
+                draw8Points(xc, yc, x, y);
+            }
+            
+            function draw8Points(xc, yc, x, y) {
+                ctx.fillRect(xc + x, yc + y, 1, 1);
+                ctx.fillRect(xc - x, yc + y, 1, 1);
+                ctx.fillRect(xc + x, yc - y, 1, 1);
+                ctx.fillRect(xc - x, yc - y, 1, 1);
+                ctx.fillRect(xc + y, yc + x, 1, 1);
+                ctx.fillRect(xc - y, yc + x, 1, 1);
+                ctx.fillRect(xc + y, yc - x, 1, 1);
+                ctx.fillRect(xc - y, yc - x, 1, 1);
+            }
+        }
+        
+        function drawCircleFill(xc, yc, radius, color) {
+            // First draw the outline
+            drawCircleMidpoint(xc, yc, radius, color);
+            
+            // Then fill it
+            ctx.fillStyle = color;
+            for (let r = 0; r < radius; r += 2) {
+                drawCircleMidpoint(xc, yc, r, color);
+            }
+        }
+        
+        // Main drawing function
+        function draw() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw all shapes
+            shapes.forEach(shape => {
+                if (shape.type === 'line-dda') {
+                    drawLineDDA(shape.start.x, shape.start.y, shape.end.x, shape.end.y, shape.color);
+                } else if (shape.type === 'line-midpoint') {
+                    drawLineMidpoint(shape.start.x, shape.start.y, shape.end.x, shape.end.y, shape.color);
+                } else if (shape.type === 'line-parametric') {
+                    drawLineParametric(shape.start.x, shape.start.y, shape.end.x, shape.end.y, shape.color);
+                } else if (shape.type === 'circle-direct') {
+                    drawCircleDirect(shape.center.x, shape.center.y, shape.radius, shape.color);
+                } else if (shape.type === 'circle-midpoint') {
+                    drawCircleMidpoint(shape.center.x, shape.center.y, shape.radius, shape.color);
+                } else if (shape.type === 'circle-fill') {
+                    drawCircleFill(shape.center.x, shape.center.y, shape.radius, shape.color);
+                }
+            });
+        }
+        
+        // Initial draw
+        draw();
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            draw();
+        });
+    </script>
+</body>
+</html> 
