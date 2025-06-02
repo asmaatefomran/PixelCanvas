@@ -109,7 +109,7 @@ void PolygonClip(HDC hdc, POINT* p, int n, int xleft, int ytop, int xright, int 
 POINT polygon[100];
 int pointCount = 0;
 bool polygonDrawn = false;
-const int xleft = 200, ytop = 100, xright = 400, ybottom = 300;
+const int defaultXLeft = 200, defaultYTop = 100, defaultXRight = 400, defaultYBottom = 300;
 // LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 //     HDC hdc;
 //     PAINTSTRUCT ps;

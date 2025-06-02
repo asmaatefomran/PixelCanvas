@@ -123,6 +123,7 @@ void CohenSuth(HDC hdc, double xs, double ys, double xe, double ye) {
         DrawLineMidpoint(hdc, Round(x1), Round(y1), Round(x2), Round(y2));
     }
 }
+
 void PointClipping(HWND hwnd, Point p) {
     if (p.x >= xleft && p.x <= xright && p.y >= ytop && p.y <= ybottom) {
         HDC hdc = GetDC(hwnd);
@@ -133,6 +134,7 @@ void PointClipping(HWND hwnd, Point p) {
     printf("Clicked point: (%d, %d)\n", (int)p.x, (int)p.y);
     printf("xleft: %d, xright: %d, ytop: %d, ybottom: %d\n", (int)xleft, (int)xright, (int)ytop, (int)ybottom);
 }
+
 void getSquareWindow() {
     xleft = min(in[0].x, in[1].x);
     xright = max(in[0].x, in[1].x);

@@ -28,6 +28,9 @@
 // Include custom headers (excluding filling.h)
 #include "../include/Circle.h"
 #include "../include/Line.h"
+#include "../include/LineClipping.h"
+#include "../include/PolygonClipping.h"
+#include "../include/Clipping.h"
 
 // Define common control constants if not already defined
 #ifndef BTNS_BUTTON
@@ -75,6 +78,10 @@
 #define ID_ALGO_LIANG_BARSKY 3008
 #define ID_ALGO_DIRECT 3009
 #define ID_ALGO_CARDINAL 3010
+
+// New clipping algorithm options
+#define ID_ALGO_LINE_CLIPPING 3011
+#define ID_ALGO_POLYGON_CLIPPING 3012
 
 // Fill methods
 #define ID_FILL_LINES 4001
@@ -636,6 +643,10 @@ void CreateMenus(HWND hwnd) {
     AppendMenuW(g_hAlgoMenu, MF_STRING, ID_ALGO_PARAMETRIC, L"&Parametric");
     AppendMenuW(g_hAlgoMenu, MF_STRING, ID_ALGO_POLAR, L"P&olar");
     AppendMenuW(g_hAlgoMenu, MF_STRING, ID_ALGO_DIRECT, L"&Direct");
+    // Add separator before clipping algorithms
+    AppendMenuW(g_hAlgoMenu, MF_SEPARATOR, 0, NULL);
+    AppendMenuW(g_hAlgoMenu, MF_STRING, ID_ALGO_LINE_CLIPPING, L"&Line Clipping");
+    AppendMenuW(g_hAlgoMenu, MF_STRING, ID_ALGO_POLYGON_CLIPPING, L"&Polygon Clipping");
     AppendMenuW(g_hMenuBar, MF_POPUP, (UINT_PTR)g_hAlgoMenu, L"&Algorithms");
 
     // Create Fill menu
@@ -1108,6 +1119,8 @@ void HandleMenuSelection(HWND hwnd, WPARAM wParam) {
         case ID_ALGO_HERMITE:
         case ID_ALGO_COHEN_SUTHERLAND:
         case ID_ALGO_LIANG_BARSKY:
+        case ID_ALGO_LINE_CLIPPING:
+        case ID_ALGO_POLYGON_CLIPPING:
             {
                 // Uncheck previous algorithm
                 CheckMenuItem(g_hAlgoMenu, g_currentAlgorithm, MF_BYCOMMAND | MF_UNCHECKED);
@@ -1161,6 +1174,8 @@ void HandleMenuSelection(HWND hwnd, WPARAM wParam) {
                         switch (g_currentAlgorithm) {
                             case ID_ALGO_COHEN_SUTHERLAND: algoIndex = 0; break;
                             case ID_ALGO_LIANG_BARSKY: algoIndex = 1; break;
+                            case ID_ALGO_LINE_CLIPPING: algoIndex = 2; break;
+                            case ID_ALGO_POLYGON_CLIPPING: algoIndex = 3; break;
                         }
                         break;
                 }
@@ -1265,6 +1280,8 @@ void HandleMenuSelection(HWND hwnd, WPARAM wParam) {
         case ID_ALGO_CARDINAL: algoName = L"Cardinal"; break;
         case ID_ALGO_COHEN_SUTHERLAND: algoName = L"Cohen-Sutherland"; break;
         case ID_ALGO_LIANG_BARSKY: algoName = L"Liang-Barsky"; break;
+        case ID_ALGO_LINE_CLIPPING: algoName = L"Line Clipping"; break;
+        case ID_ALGO_POLYGON_CLIPPING: algoName = L"Polygon Clipping"; break;
         default: algoName = L"Unknown"; break;
     }
     
@@ -1830,6 +1847,8 @@ void HandleAlgorithmSelection() {
             switch (selection) {
                 case 0: algoID = ID_ALGO_COHEN_SUTHERLAND; break;
                 case 1: algoID = ID_ALGO_LIANG_BARSKY; break;
+                case 2: algoID = ID_ALGO_LINE_CLIPPING; break;
+                case 3: algoID = ID_ALGO_POLYGON_CLIPPING; break;
                 default: algoID = ID_ALGO_COHEN_SUTHERLAND; break;
             }
             break;
@@ -1997,6 +2016,8 @@ void UpdateAlgorithmDropdown() {
         case ID_TOOL_CLIP:
             SendMessage(g_hAlgorithmCombo, CB_ADDSTRING, 0, (LPARAM)L"Cohen-Sutherland");
             SendMessage(g_hAlgorithmCombo, CB_ADDSTRING, 0, (LPARAM)L"Liang-Barsky");
+            SendMessage(g_hAlgorithmCombo, CB_ADDSTRING, 0, (LPARAM)L"Line Clipping");
+            SendMessage(g_hAlgorithmCombo, CB_ADDSTRING, 0, (LPARAM)L"Polygon Clipping");
             break;
     }
     
@@ -2025,6 +2046,8 @@ void UpdateInstructions() {
         case ID_ALGO_CARDINAL: algoName = L"Cardinal"; break;
         case ID_ALGO_COHEN_SUTHERLAND: algoName = L"Cohen-Sutherland"; break;
         case ID_ALGO_LIANG_BARSKY: algoName = L"Liang-Barsky"; break;
+        case ID_ALGO_LINE_CLIPPING: algoName = L"Line Clipping"; break;
+        case ID_ALGO_POLYGON_CLIPPING: algoName = L"Polygon Clipping"; break;
         default: algoName = L"Unknown"; break;
     }
     
@@ -2125,6 +2148,20 @@ void UpdateInstructions() {
                     L"2. Drag to the bottom-right corner\n"
                     L"3. Release to set the clipping window\n\n"
                     L"Current algorithm: %s", algoName);
+                    
+            // Add specific instructions for line and polygon clipping
+            if (g_currentAlgorithm == ID_ALGO_LINE_CLIPPING) {
+                wcscpy(helpText, L"Line Clipping:\n"
+                       L"1. Right-click twice to define clipping window\n"
+                       L"2. Left-click twice to define line to clip\n"
+                       L"3. The clipped line will be drawn in green");
+            }
+            else if (g_currentAlgorithm == ID_ALGO_POLYGON_CLIPPING) {
+                wcscpy(helpText, L"Polygon Clipping:\n"
+                       L"1. Left-click to add polygon vertices\n"
+                       L"2. Right-click to complete the polygon\n"
+                       L"3. The clipped polygon will be drawn in blue");
+            }
             break;
             
         case ID_TOOL_FILL:
@@ -2710,6 +2747,28 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         // Update the canvas
                         InvalidateRect(hwnd, &g_canvasRect, FALSE);
                     }
+                    else if (g_currentTool == ID_TOOL_CLIP) {
+                        // Handle clipping based on selected algorithm
+                        if (g_currentAlgorithm == ID_ALGO_LINE_CLIPPING) {
+                            // Use our line clipping implementation
+                            if (handleLineClippingInput(hwnd, x, y, false)) {
+                                return 0;
+                            }
+                        } 
+                        else if (g_currentAlgorithm == ID_ALGO_POLYGON_CLIPPING) {
+                            // Use our polygon clipping implementation
+                            if (handlePolygonClippingInput(hwnd, x, y, false)) {
+                                return 0;
+                            }
+                        }
+                        else {
+                            // Default clipping behavior (Cohen-Sutherland, Liang-Barsky)
+                            g_startPoint.x = x;
+                            g_startPoint.y = y;
+                            g_endPoint = g_startPoint;
+                            g_isDrawing = true;
+                        }
+                    }
                     else {
                         g_startPoint.x = x;
                         g_startPoint.y = y;
@@ -2893,6 +2952,33 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
         case WM_RBUTTONDOWN:
             {
+                // Get mouse coordinates
+                int x = GET_X_LPARAM(lParam);
+                int y = GET_Y_LPARAM(lParam);
+                
+                // Check if we're in the canvas area
+                if (x >= g_canvasRect.left && x <= g_canvasRect.right &&
+                    y >= g_canvasRect.top && y <= g_canvasRect.bottom) {
+                    
+                    // Convert to canvas coordinates
+                    x = x - g_canvasRect.left;
+                    y = y - g_canvasRect.top;
+                    
+                    // Handle clipping with right-click if we're in clipping mode
+                    if (g_currentTool == ID_TOOL_CLIP) {
+                        if (g_currentAlgorithm == ID_ALGO_LINE_CLIPPING) {
+                            if (handleLineClippingInput(hwnd, x, y, true)) {
+                                return 0;
+                            }
+                        }
+                        else if (g_currentAlgorithm == ID_ALGO_POLYGON_CLIPPING) {
+                            if (handlePolygonClippingInput(hwnd, x, y, true)) {
+                                return 0;
+                            }
+                        }
+                    }
+                }
+                
                 // Right-click to finish polygon
                 if (g_currentTool == ID_TOOL_POLYGON && g_polygonPoints.size() >= 3) {
                     // Check fill checkbox state directly
