@@ -29,6 +29,7 @@
 #include "../include/Circle.h"
 #include "../include/Line.h"
 #include "../include/Clipping.h"
+#include "../include/Curve.h" // Add Curve header
 
 // Define common control constants if not already defined
 #ifndef BTNS_BUTTON
@@ -72,14 +73,16 @@
 #define ID_ALGO_POLAR 3004
 #define ID_ALGO_BEZIER 3005
 #define ID_ALGO_HERMITE 3006
-#define ID_ALGO_COHEN_SUTHERLAND 3007
-#define ID_ALGO_LIANG_BARSKY 3008
 #define ID_ALGO_DIRECT 3009
 #define ID_ALGO_CARDINAL 3010
 
 // New clipping algorithm options
 #define ID_ALGO_LINE_CLIPPING 3011
 #define ID_ALGO_POLYGON_CLIPPING 3012
+
+// New curve filling algorithms
+#define ID_ALGO_HERMITE_FILL_VERTICAL 3013
+#define ID_ALGO_BEZIER_FILL_HORIZONTAL 3014
 
 // Fill methods
 #define ID_FILL_LINES 4001
@@ -509,6 +512,10 @@ void UpdateEllipseStatus() {
     UpdateInstructions();
 }
 
+// Add these global variables for curve filling
+POINT g_curveStartPoint;
+bool g_isCurveFirstClick = true;
+
 // Entry point
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     // Initialize common controls
@@ -856,7 +863,6 @@ void CreateControls(HWND hwnd) {
     SendMessage(g_hShapeCombo, CB_ADDSTRING, 0, (LPARAM)L"Curve");
     SendMessage(g_hShapeCombo, CB_ADDSTRING, 0, (LPARAM)L"Polygon");
     SendMessage(g_hShapeCombo, CB_ADDSTRING, 0, (LPARAM)L"Clipping");
-    SendMessage(g_hShapeCombo, CB_ADDSTRING, 0, (LPARAM)L"Fill");
     SendMessage(g_hShapeCombo, CB_SETCURSEL, 0, 0); // Select Line by default
     
     // Create algorithm dropdown
@@ -1115,8 +1121,6 @@ void HandleMenuSelection(HWND hwnd, WPARAM wParam) {
         case ID_ALGO_DIRECT:
         case ID_ALGO_BEZIER:
         case ID_ALGO_HERMITE:
-        case ID_ALGO_COHEN_SUTHERLAND:
-        case ID_ALGO_LIANG_BARSKY:
         case ID_ALGO_LINE_CLIPPING:
         case ID_ALGO_POLYGON_CLIPPING:
             {
@@ -1769,6 +1773,9 @@ void HandleShapeSelection() {
         g_ellipseDrawingMode = true;
     }
     
+    // Show/hide Cardinal Spline controls based on current tool
+    UpdateCardinalControls(g_hwnd, g_currentTool == ID_TOOL_CURVE && g_currentAlgorithm == ID_ALGO_CARDINAL);
+    
     // Update the algorithm dropdown to show appropriate algorithms for this tool
     UpdateAlgorithmDropdown();
     
@@ -1826,6 +1833,8 @@ void HandleAlgorithmSelection() {
         case ID_TOOL_CURVE:
             switch (selection) {
                 case 0: algoID = ID_ALGO_CARDINAL; break;
+                case 1: algoID = ID_ALGO_HERMITE_FILL_VERTICAL; break;
+                case 2: algoID = ID_ALGO_BEZIER_FILL_HORIZONTAL; break;
                 default: algoID = ID_ALGO_CARDINAL; break;
             }
             break;
@@ -2005,6 +2014,8 @@ void UpdateAlgorithmDropdown() {
             
         case ID_TOOL_CURVE:
             SendMessage(g_hAlgorithmCombo, CB_ADDSTRING, 0, (LPARAM)L"Cardinal");
+            SendMessage(g_hAlgorithmCombo, CB_ADDSTRING, 0, (LPARAM)L"Filling Square with Hermite Curve [Vertical]");
+            SendMessage(g_hAlgorithmCombo, CB_ADDSTRING, 0, (LPARAM)L"Filling Rectangle with Bezier Curve [Horizontal]");
             break;
             
         case ID_TOOL_POLYGON:
@@ -2043,6 +2054,8 @@ void UpdateInstructions() {
         case ID_ALGO_CARDINAL: algoName = L"Cardinal"; break;
         case ID_ALGO_LINE_CLIPPING: algoName = L"Line Clipping"; break;
         case ID_ALGO_POLYGON_CLIPPING: algoName = L"Polygon Clipping"; break;
+        case ID_ALGO_HERMITE_FILL_VERTICAL: algoName = L"Hermite Fill Vertical"; break;
+        case ID_ALGO_BEZIER_FILL_HORIZONTAL: algoName = L"Bezier Fill Horizontal"; break;
         default: algoName = L"Unknown"; break;
     }
     
@@ -2771,6 +2784,27 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         g_isDrawing = true;
                     }
                 }
+                
+                // If we're in curve mode with Hermite or Bezier fill algorithms, store the first point
+                if (g_currentTool == ID_TOOL_CURVE && 
+                    (g_currentAlgorithm == ID_ALGO_HERMITE_FILL_VERTICAL || 
+                     g_currentAlgorithm == ID_ALGO_BEZIER_FILL_HORIZONTAL)) {
+                    g_curveStartPoint.x = GET_X_LPARAM(lParam);
+                    g_curveStartPoint.y = GET_Y_LPARAM(lParam);
+                    g_isCurveFirstClick = false;
+                    
+                    // Draw a dot to mark the start point
+                    SetPixel(g_hdcMem, g_curveStartPoint.x, g_curveStartPoint.y, RGB(255, 0, 0));
+                    InvalidateRect(hwnd, NULL, FALSE);
+                    
+                    // Update status bar
+                    wchar_t msg[256];
+                    _snwprintf(msg, 256, L"First point set at (%d, %d). Right-click to set second point and fill.", 
+                              g_curveStartPoint.x, g_curveStartPoint.y);
+                    UpdateStatusBar(msg);
+                    
+                    return 0;
+                }
             }
             return 0;
 
@@ -2813,137 +2847,44 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
         case WM_LBUTTONUP:
             {
+                // Get cursor position
+                int x = GET_X_LPARAM(lParam);
+                int y = GET_Y_LPARAM(lParam);
+                
+                // If we're in drawing mode
                 if (g_isDrawing) {
-                    int x = GET_X_LPARAM(lParam);
-                    int y = GET_Y_LPARAM(lParam);
+                    g_isDrawing = false;
+                    g_endPoint.x = x;
+                    g_endPoint.y = y;
                     
-                    // Convert to canvas coordinates
-                    g_endPoint.x = x - g_canvasRect.left;
-                    g_endPoint.y = y - g_canvasRect.top;
-                    
-                    // Draw the shape permanently
+                    // Handle based on current tool
                     switch (g_currentTool) {
                         case ID_TOOL_LINE:
-                            // For lines, we should completely ignore fill settings since lines can't be filled
-                            try {
-                                // Create a line object
-                                Line line(g_hdcMem);
-                                
-                                // Use the appropriate algorithm based on current selection
-                                switch (g_currentAlgorithm) {
-                                    case ID_ALGO_DDA:
-                                        line.DrawLineDDA(g_startPoint.x, g_startPoint.y, 
-                                                     g_endPoint.x, g_endPoint.y, g_currentColor);
-                                        break;
-                                    
-                                    case ID_ALGO_MIDPOINT:
-                                        line.DrawLineMidpoint(g_startPoint.x, g_startPoint.y, 
-                                                          g_endPoint.x, g_endPoint.y, g_currentColor);
-                                        break;
-                                    
-                                    case ID_ALGO_PARAMETRIC:
-                                        line.DrawLineParametric(g_startPoint.x, g_startPoint.y, 
-                                                           g_endPoint.x, g_endPoint.y, g_currentColor);
-                                        break;
-                                    
-                                    default:
-                                        // Fallback to DDA
-                                        line.DrawLineDDA(g_startPoint.x, g_startPoint.y, 
-                                                     g_endPoint.x, g_endPoint.y, g_currentColor);
-                                        break;
-                                }
-                                
-                                // If line thickness > 1, draw a thicker line using GDI
-                                if (g_lineThickness > 1) {
-                                    HPEN hPen = CreatePen(PS_SOLID, g_lineThickness, g_currentColor);
-                                    HPEN hOldPen = (HPEN)SelectObject(g_hdcMem, hPen);
-                                    
-                                    MoveToEx(g_hdcMem, g_startPoint.x, g_startPoint.y, NULL);
-                                    LineTo(g_hdcMem, g_endPoint.x, g_endPoint.y);
-                                    
-                                    SelectObject(g_hdcMem, hOldPen);
-                                    DeleteObject(hPen);
-                                }
-                            }
-                            catch (...) {
-                                // Fallback to simple GDI line if custom implementation fails
-                                DrawLine(g_hdcMem, g_startPoint.x, g_startPoint.y, 
-                                       g_endPoint.x, g_endPoint.y, g_currentColor, g_lineThickness);
-                            }
-                            break;
-                            
-                        case ID_TOOL_CIRCLE:
-                            {
-                                // Calculate radius
-                                int dx = g_endPoint.x - g_startPoint.x;
-                                int dy = g_endPoint.y - g_startPoint.y;
-                                int radius = (int)sqrt((double)(dx*dx + dy*dy));
-                                
-                                // Safety check - prevent negative or zero radius
-                                if (radius <= 0) radius = 1;
-                                
-                                try {
-                                    // Get the current checkbox state directly
-                                    BOOL isChecked = (SendMessage(g_hFillCheckbox, BM_GETCHECK, 0, 0) == BST_CHECKED);
-                                    
-                                    // Update g_isFilled based on current checkbox state
-                                    g_isFilled = (isChecked == TRUE);
-                                    
-                                    // Explicitly print the current fill state to debug
-                                    wchar_t debugMsg[256];
-                                    _snwprintf(debugMsg, 256, L"[DEBUG] Drawing circle with fill = %s (checkbox state: %s)", 
-                                             g_isFilled ? L"TRUE" : L"FALSE",
-                                             isChecked ? L"CHECKED" : L"UNCHECKED");
-                                    OutputDebugStringW(debugMsg);
-                                    
-                                    // Draw the circle with or without fill based on current checkbox state
-                                    DrawCircle(g_hdcMem, g_startPoint.x, g_startPoint.y, radius, 
-                                             g_currentColor, g_lineThickness, g_isFilled);
-                                }
-                                catch (...) {
-                                    // Fallback to simple circle if custom implementation fails
-                                    DrawCircle(g_hdcMem, g_startPoint.x, g_startPoint.y, radius, 
-                                             g_currentColor, g_lineThickness, false);
-                                    
-                                    // Inform user of the error
-                                    MessageBoxW(hwnd, L"Error drawing circle with fill. Falling back to outline only.", 
-                                             L"Drawing Error", MB_OK | MB_ICONWARNING);
-                                }
-                            }
-                            break;
-                            
-                            
-                        // Note: Ellipse is now handled by the 3-point method in WM_LBUTTONDOWN
-                        
-                        case ID_TOOL_CURVE:
-                            // For now, just draw a line
                             DrawLine(g_hdcMem, g_startPoint.x, g_startPoint.y, g_endPoint.x, g_endPoint.y, g_currentColor, g_lineThickness);
                             break;
+                        
+                        case ID_TOOL_CIRCLE:
+                        {
+                            int radius = (int)sqrt(pow(g_endPoint.x - g_startPoint.x, 2) + pow(g_endPoint.y - g_startPoint.y, 2));
+                            DrawCircle(g_hdcMem, g_startPoint.x, g_startPoint.y, radius, g_currentColor, g_lineThickness, g_isFilled);
+                            break;
+                        }
+                        
+                        case ID_TOOL_FILL:
+                            // Fill operation happens on mouse down, not up
+                            break;
                             
-                        case ID_TOOL_CLIP:
-                            // For now, just draw a rectangle
-                            HPEN hPen = CreatePen(PS_DASH, 1, g_currentColor);
-                            HPEN hOldPen = (HPEN)SelectObject(g_hdcMem, hPen);
-                            HBRUSH hOldBrush = (HBRUSH)SelectObject(g_hdcMem, GetStockObject(NULL_BRUSH));
-                            
-                            Rectangle(g_hdcMem, g_startPoint.x, g_startPoint.y, g_endPoint.x, g_endPoint.y);
-                            
-                            SelectObject(g_hdcMem, hOldPen);
-                            SelectObject(g_hdcMem, hOldBrush);
-                            DeleteObject(hPen);
+                        default:
                             break;
                     }
                     
-                    g_isDrawing = false;
-                    
-                    // Redraw the canvas
-                    InvalidateRect(hwnd, &g_canvasRect, FALSE);
-                    
-                    // Ensure the fill checkbox state is synchronized with g_isFilled
-                    SendMessage(g_hFillCheckbox, BM_SETCHECK, g_isFilled ? BST_CHECKED : BST_UNCHECKED, 0);
+                    // Update the fill checkbox to match the current state
+                    if (g_currentTool != ID_TOOL_POLYGON) {
+                        SendMessage(g_hFillCheckbox, BM_SETCHECK, g_isFilled ? BST_CHECKED : BST_UNCHECKED, 0);
+                    }
                 }
+                return 0;
             }
-            return 0;
 
         case WM_RBUTTONDOWN:
             {
@@ -3054,6 +2995,55 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     
                     // Redraw the canvas
                     InvalidateRect(hwnd, &g_canvasRect, FALSE);
+                }
+                
+                // If we're in curve mode with Hermite or Bezier fill algorithms and first point is set
+                if (g_currentTool == ID_TOOL_CURVE && !g_isCurveFirstClick &&
+                    (g_currentAlgorithm == ID_ALGO_HERMITE_FILL_VERTICAL || 
+                     g_currentAlgorithm == ID_ALGO_BEZIER_FILL_HORIZONTAL)) {
+                    
+                    int x2 = GET_X_LPARAM(lParam);
+                    int y2 = GET_Y_LPARAM(lParam);
+                    
+                    // Create a Curve object
+                    Curve curve(g_hdcMem);
+                    
+                    // Sort the points to ensure x1 <= x2 and y1 <= y2
+                    int x1 = g_curveStartPoint.x;
+                    int y1 = g_curveStartPoint.y;
+                    
+                    if (x1 > x2) std::swap(x1, x2);
+                    if (y1 > y2) std::swap(y1, y2);
+                    
+                    // Apply the selected algorithm
+                    if (g_currentAlgorithm == ID_ALGO_HERMITE_FILL_VERTICAL) {
+                        curve.FillWithHermite(x1, y1, x2, y2, g_currentColor);
+                    } else if (g_currentAlgorithm == ID_ALGO_BEZIER_FILL_HORIZONTAL) {
+                        curve.FillWithBezier(x1, y1, x2, y2, g_currentColor);
+                    }
+                    
+                    // Draw a rectangle around the filled area
+                    HPEN hPen = CreatePen(PS_DASH, 1, RGB(0, 0, 0));
+                    HPEN hOldPen = (HPEN)SelectObject(g_hdcMem, hPen);
+                    HBRUSH hOldBrush = (HBRUSH)SelectObject(g_hdcMem, GetStockObject(NULL_BRUSH));
+                    
+                    Rectangle(g_hdcMem, x1, y1, x2, y2);
+                    
+                    SelectObject(g_hdcMem, hOldPen);
+                    SelectObject(g_hdcMem, hOldBrush);
+                    DeleteObject(hPen);
+                    
+                    // Reset for next curve
+                    g_isCurveFirstClick = true;
+                    
+                    // Update status bar
+                    wchar_t msg[256];
+                    _snwprintf(msg, 256, L"Filled area between (%d, %d) and (%d, %d).", 
+                              g_curveStartPoint.x, g_curveStartPoint.y, x2, y2);
+                    UpdateStatusBar(msg);
+                    
+                    InvalidateRect(hwnd, NULL, FALSE);
+                    return 0;
                 }
             }
             return 0;
@@ -3504,6 +3494,9 @@ void UpdateControlVisibility() {
         ShowWindow(g_hPolyFillLabel, SW_HIDE);
         ShowWindow(g_hPolyFillCombo, SW_HIDE);
     }
+    
+    // Show/hide Cardinal Spline tension controls based on current tool and algorithm
+    UpdateCardinalControls(g_hwnd, g_currentTool == ID_TOOL_CURVE && g_currentAlgorithm == ID_ALGO_CARDINAL);
 }
 
 // Add a new helper function at the end of the file
