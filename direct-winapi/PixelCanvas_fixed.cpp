@@ -64,7 +64,7 @@
 #define ID_TOOL_CURVE 2004
 #define ID_TOOL_POLYGON 2005
 #define ID_TOOL_CLIP 2006
-#define ID_TOOL_FILL 2007  // Add new fill tool
+#define ID_TOOL_FILL 2007  // Add new f
 
 // Algorithms
 #define ID_ALGO_DDA 3001
@@ -209,7 +209,7 @@ RECT g_canvasRect = {0, 0, 0, 0};
 bool g_ellipseDrawingMode = false;
 
 // Add global variable for Cardinal Spline tension
-float g_cardinalTension = 0.5f; // Default tension value
+float g_cardinalTension = 0.0; // Default tension parameter for Cardinal splines
 
 // Define point struct for polygon filling
 struct point {
@@ -515,6 +515,9 @@ void UpdateEllipseStatus() {
 // Add these global variables for curve filling
 POINT g_curveStartPoint;
 bool g_isCurveFirstClick = true;
+
+// For clipping
+RECT g_clipRect = {0, 0, 0, 0};
 
 // Entry point
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
@@ -2793,16 +2796,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     g_curveStartPoint.y = GET_Y_LPARAM(lParam);
                     g_isCurveFirstClick = false;
                     
-                    // Draw a dot to mark the start point
-                    SetPixel(g_hdcMem, g_curveStartPoint.x, g_curveStartPoint.y, RGB(255, 0, 0));
-                    InvalidateRect(hwnd, NULL, FALSE);
-                    
-                    // Update status bar
-                    wchar_t msg[256];
-                    _snwprintf(msg, 256, L"First point set at (%d, %d). Right-click to set second point and fill.", 
-                              g_curveStartPoint.x, g_curveStartPoint.y);
-                    UpdateStatusBar(msg);
-                    
                     return 0;
                 }
             }
@@ -3022,25 +3015,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         curve.FillWithBezier(x1, y1, x2, y2, g_currentColor);
                     }
                     
-                    // Draw a rectangle around the filled area
-                    HPEN hPen = CreatePen(PS_DASH, 1, RGB(0, 0, 0));
-                    HPEN hOldPen = (HPEN)SelectObject(g_hdcMem, hPen);
-                    HBRUSH hOldBrush = (HBRUSH)SelectObject(g_hdcMem, GetStockObject(NULL_BRUSH));
-                    
-                    Rectangle(g_hdcMem, x1, y1, x2, y2);
-                    
-                    SelectObject(g_hdcMem, hOldPen);
-                    SelectObject(g_hdcMem, hOldBrush);
-                    DeleteObject(hPen);
-                    
                     // Reset for next curve
                     g_isCurveFirstClick = true;
-                    
-                    // Update status bar
-                    wchar_t msg[256];
-                    _snwprintf(msg, 256, L"Filled area between (%d, %d) and (%d, %d).", 
-                              g_curveStartPoint.x, g_curveStartPoint.y, x2, y2);
-                    UpdateStatusBar(msg);
                     
                     InvalidateRect(hwnd, NULL, FALSE);
                     return 0;

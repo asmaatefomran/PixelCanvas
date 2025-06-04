@@ -18,11 +18,20 @@ void Curve::DrawHermite(int x0, int y0, int x1, int y1, int t0, int t1, COLORREF
 }
 
 void Curve::FillWithHermite(int x1, int y1, int x2, int y2, COLORREF color) {
-    int step = 1;
-    for (int x = x1; x <= x2; x += step) {
-        DrawHermite(x, y1, x, y2, 40, 40, color);
+    // Fill vertically between the two points
+    if (x2 - x1 > y2 - y1) {
+        // If width is greater than height, fill with vertical lines
+        for (int x = x1; x <= x2; x++) {
+            DrawHermite(x, y1, x, y2, 0, 0, color);
+        }
+    } else {
+        // If height is greater than width, fill with horizontal lines
+        for (int y = y1; y <= y2; y++) {
+            DrawHermite(x1, y, x2, y, 0, 0, color);
+        }
     }
 }
+
 void Curve::DrawBezier(int x0, int y0, int x1, int y1, int x2, int y2, int x3, int y3, COLORREF color) {
     for (double t = 0; t <= 1; t += 0.001) {
         double mt = 1 - t;
@@ -35,8 +44,16 @@ void Curve::DrawBezier(int x0, int y0, int x1, int y1, int x2, int y2, int x3, i
 }
 
 void Curve::FillWithBezier(int x1, int y1, int x2, int y2, COLORREF color) {
-    int step = 1;
-    for (int y = y1; y <= y2; y += step) {
-        DrawBezier(x1, y, x1 + 20, y - 20, x2 - 20, y + 20, x2, y, color);
+    // Fill horizontally between the two points
+    if (x2 - x1 > y2 - y1) {
+        // If width is greater than height, fill with vertical lines
+        for (int x = x1; x <= x2; x++) {
+            DrawBezier(x, y1, x, (y1+y2)/2-20, x, (y1+y2)/2+20, x, y2, color);
+        }
+    } else {
+        // If height is greater than width, fill with horizontal lines
+        for (int y = y1; y <= y2; y++) {
+            DrawBezier(x1, y, (x1+x2)/2-20, y, (x1+x2)/2+20, y, x2, y, color);
+        }
     }
 }
