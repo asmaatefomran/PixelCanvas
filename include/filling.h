@@ -20,7 +20,7 @@ void myFloodFillQueue(HDC hdc, int x, int y, COLORREF bc, COLORREF fc);
 bool IsPolygonConvex(const std::vector<point>& points);
 
 // Helper function to round a double to an int
-inline int Round(double x) {
+inline int FillRound(double x) {
     return (int)(x + 0.5);
 }
 

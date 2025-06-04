@@ -24,12 +24,12 @@ void DrawLineDDA(HDC hdc, int x1, int y1, int x2, int y2, COLORREF c)
         x = x1,
         y = y1;
 
-    SetPixel(hdc, Round(x), Round(y), c);
+    SetPixel(hdc, FillRound(x), FillRound(y), c);
 
     for (int i = 0; i < steps; i++) {
         x += x_increment;
         y += y_increment;
-        SetPixel(hdc, Round(x), Round(y), c);
+        SetPixel(hdc, FillRound(x), FillRound(y), c);
     }
 }
 

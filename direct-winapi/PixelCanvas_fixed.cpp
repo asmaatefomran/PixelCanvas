@@ -28,8 +28,6 @@
 // Include custom headers (excluding filling.h)
 #include "../include/Circle.h"
 #include "../include/Line.h"
-#include "../include/LineClipping.h"
-#include "../include/PolygonClipping.h"
 #include "../include/Clipping.h"
 
 // Define common control constants if not already defined
@@ -1172,10 +1170,9 @@ void HandleMenuSelection(HWND hwnd, WPARAM wParam) {
                         
                     case ID_TOOL_CLIP:
                         switch (g_currentAlgorithm) {
-                            case ID_ALGO_COHEN_SUTHERLAND: algoIndex = 0; break;
-                            case ID_ALGO_LIANG_BARSKY: algoIndex = 1; break;
-                            case ID_ALGO_LINE_CLIPPING: algoIndex = 2; break;
-                            case ID_ALGO_POLYGON_CLIPPING: algoIndex = 3; break;
+                            case ID_ALGO_LINE_CLIPPING: algoIndex = 0; break;
+                            case ID_ALGO_POLYGON_CLIPPING: algoIndex = 1; break;
+                            default: algoIndex = 0; break;
                         }
                         break;
                 }
@@ -1278,8 +1275,6 @@ void HandleMenuSelection(HWND hwnd, WPARAM wParam) {
         case ID_ALGO_BEZIER: algoName = L"Bezier"; break;
         case ID_ALGO_HERMITE: algoName = L"Hermite"; break;
         case ID_ALGO_CARDINAL: algoName = L"Cardinal"; break;
-        case ID_ALGO_COHEN_SUTHERLAND: algoName = L"Cohen-Sutherland"; break;
-        case ID_ALGO_LIANG_BARSKY: algoName = L"Liang-Barsky"; break;
         case ID_ALGO_LINE_CLIPPING: algoName = L"Line Clipping"; break;
         case ID_ALGO_POLYGON_CLIPPING: algoName = L"Polygon Clipping"; break;
         default: algoName = L"Unknown"; break;
@@ -1845,11 +1840,15 @@ void HandleAlgorithmSelection() {
             
         case ID_TOOL_CLIP:
             switch (selection) {
-                case 0: algoID = ID_ALGO_COHEN_SUTHERLAND; break;
-                case 1: algoID = ID_ALGO_LIANG_BARSKY; break;
-                case 2: algoID = ID_ALGO_LINE_CLIPPING; break;
-                case 3: algoID = ID_ALGO_POLYGON_CLIPPING; break;
-                default: algoID = ID_ALGO_COHEN_SUTHERLAND; break;
+                case 0: 
+                    algoID = ID_ALGO_LINE_CLIPPING; 
+                    startLineClippingMode();
+                    break;
+                case 1: 
+                    algoID = ID_ALGO_POLYGON_CLIPPING; 
+                    startPolygonClippingMode();
+                    break;
+                default: algoID = ID_ALGO_LINE_CLIPPING; break;
             }
             break;
     }
@@ -2014,8 +2013,6 @@ void UpdateAlgorithmDropdown() {
             break;
             
         case ID_TOOL_CLIP:
-            SendMessage(g_hAlgorithmCombo, CB_ADDSTRING, 0, (LPARAM)L"Cohen-Sutherland");
-            SendMessage(g_hAlgorithmCombo, CB_ADDSTRING, 0, (LPARAM)L"Liang-Barsky");
             SendMessage(g_hAlgorithmCombo, CB_ADDSTRING, 0, (LPARAM)L"Line Clipping");
             SendMessage(g_hAlgorithmCombo, CB_ADDSTRING, 0, (LPARAM)L"Polygon Clipping");
             break;
@@ -2044,8 +2041,6 @@ void UpdateInstructions() {
         case ID_ALGO_BEZIER: algoName = L"Bezier"; break;
         case ID_ALGO_HERMITE: algoName = L"Hermite"; break;
         case ID_ALGO_CARDINAL: algoName = L"Cardinal"; break;
-        case ID_ALGO_COHEN_SUTHERLAND: algoName = L"Cohen-Sutherland"; break;
-        case ID_ALGO_LIANG_BARSKY: algoName = L"Liang-Barsky"; break;
         case ID_ALGO_LINE_CLIPPING: algoName = L"Line Clipping"; break;
         case ID_ALGO_POLYGON_CLIPPING: algoName = L"Polygon Clipping"; break;
         default: algoName = L"Unknown"; break;
@@ -2469,8 +2464,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     y >= g_canvasRect.top && y <= g_canvasRect.bottom) {
                     
                     // Convert to canvas coordinates
-                    x = x - g_canvasRect.left;
-                    y = y - g_canvasRect.top;
+                    int canvasX = x - g_canvasRect.left;
+                    int canvasY = y - g_canvasRect.top;
                     
                     // Handle different tools
                     if (g_currentTool == ID_TOOL_POLYGON) {
@@ -2482,7 +2477,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         g_polyFillEnabled = (isChecked == TRUE);
                         
                         // Add point to polygon
-                        POINT pt = {x, y};
+                        POINT pt = {canvasX, canvasY};
                         g_polygonPoints.push_back(pt);
                         
                         // Draw a small point to mark the vertex - ALWAYS filled regardless of checkbox state
@@ -2492,7 +2487,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         HPEN hOldPen = (HPEN)SelectObject(g_hdcMem, hPen);
                         
                         // Draw a small filled circle manually without using g_isFilled
-                        Ellipse(g_hdcMem, x-2, y-2, x+2, y+2);
+                        Ellipse(g_hdcMem, canvasX-2, canvasY-2, canvasX+2, canvasY+2);
                         
                         // Restore original objects
                         SelectObject(g_hdcMem, hOldBrush);
@@ -2512,7 +2507,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     }
                     else if (g_currentTool == ID_TOOL_CURVE) {
                         // Add point for curve
-                        POINT pt = {x, y};
+                        POINT pt = {canvasX, canvasY};
                         
                         // Only add if we have less than 4 points
                         if (g_polygonPoints.size() < 4) {
@@ -2525,7 +2520,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                             HPEN hOldPen = (HPEN)SelectObject(g_hdcMem, hPen);
                             
                             // Draw a small filled circle manually
-                            Ellipse(g_hdcMem, x-3, y-3, x+3, y+3);
+                            Ellipse(g_hdcMem, canvasX-3, canvasY-3, canvasX+3, canvasY+3);
                             
                             // Restore original objects
                             SelectObject(g_hdcMem, hOldBrush);
@@ -2586,8 +2581,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         // Handle 3-point ellipse drawing
                         if (g_ellipseClickCount == 0) {
                             // First click - store the center point
-                            g_ellipseCenter.x = x;
-                            g_ellipseCenter.y = y;
+                            g_ellipseCenter.x = canvasX;
+                            g_ellipseCenter.y = canvasY;
                             g_ellipseClickCount++;
                             
                             // Draw a small point to mark the center without using g_isFilled
@@ -2597,7 +2592,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                             HPEN hOldPen = (HPEN)SelectObject(g_hdcMem, hPen);
                             
                             // Draw a small filled circle manually
-                            Ellipse(g_hdcMem, x-2, y-2, x+2, y+2);
+                            Ellipse(g_hdcMem, canvasX-2, canvasY-2, canvasX+2, canvasY+2);
                             
                             // Restore original objects
                             SelectObject(g_hdcMem, hOldBrush);
@@ -2615,8 +2610,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         }
                         else if (g_ellipseClickCount == 1) {
                             // Second click - store first axis point
-                            g_ellipsePoint1.x = x;
-                            g_ellipsePoint1.y = y;
+                            g_ellipsePoint1.x = canvasX;
+                            g_ellipsePoint1.y = canvasY;
                             g_ellipseClickCount++;
                             
                             // Draw a small point without using g_isFilled
@@ -2626,7 +2621,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                             HPEN hOldPen = (HPEN)SelectObject(g_hdcMem, hPen);
                             
                             // Draw a small filled circle manually
-                            Ellipse(g_hdcMem, x-2, y-2, x+2, y+2);
+                            Ellipse(g_hdcMem, canvasX-2, canvasY-2, canvasX+2, canvasY+2);
                             
                             // Restore original objects
                             SelectObject(g_hdcMem, hOldBrush);
@@ -2641,8 +2636,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         }
                         else if (g_ellipseClickCount == 2) {
                             // Third click - store second axis point
-                            g_ellipsePoint2.x = x;
-                            g_ellipsePoint2.y = y;
+                            g_ellipsePoint2.x = canvasX;
+                            g_ellipsePoint2.y = canvasY;
                             
                             // Calculate a and b for the ellipse
                             int dx1 = g_ellipsePoint1.x - g_ellipseCenter.x;
@@ -2716,7 +2711,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     }
                     else if (g_currentTool == ID_TOOL_FILL) {
                         // Get the target color (the color of the pixel at the click position)
-                        COLORREF targetColor = GetPixel(g_hdcMem, x, y);
+                        COLORREF targetColor = GetPixel(g_hdcMem, canvasX, canvasY);
                         
                         // Don't fill if clicking on the fill color already
                         if (targetColor == g_currentColor) {
@@ -2728,7 +2723,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         OutputDebugStringW(L"[DEBUG] Using GDI ExtFloodFill for reliable filling");
                         
                         // Use Windows GDI's ExtFloodFill function
-                        BOOL result = ExtFloodFill(g_hdcMem, x, y, targetColor, FLOODFILLSURFACE);
+                        BOOL result = ExtFloodFill(g_hdcMem, canvasX, canvasY, targetColor, FLOODFILLSURFACE);
                         
                         if (!result) {
                             // If ExtFloodFill fails, try with simpler approach
@@ -2738,7 +2733,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                             HBRUSH hBrush = CreateSolidBrush(g_currentColor);
                             
                             // Simple approach: just fill the boundary defined by the target color
-                            FloodFill(g_hdcMem, x, y, targetColor);
+                            FloodFill(g_hdcMem, canvasX, canvasY, targetColor);
                             
                             // Clean up
                             DeleteObject(hBrush);
@@ -2751,27 +2746,27 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         // Handle clipping based on selected algorithm
                         if (g_currentAlgorithm == ID_ALGO_LINE_CLIPPING) {
                             // Use our line clipping implementation
-                            if (handleLineClippingInput(hwnd, x, y, false)) {
+                            if (handleLineClippingInput(hwnd, canvasX, canvasY, false)) {
                                 return 0;
                             }
                         } 
                         else if (g_currentAlgorithm == ID_ALGO_POLYGON_CLIPPING) {
                             // Use our polygon clipping implementation
-                            if (handlePolygonClippingInput(hwnd, x, y, false)) {
+                            if (handlePolygonClippingInput(hwnd, canvasX, canvasY, false)) {
                                 return 0;
                             }
                         }
                         else {
                             // Default clipping behavior (Cohen-Sutherland, Liang-Barsky)
-                            g_startPoint.x = x;
-                            g_startPoint.y = y;
+                            g_startPoint.x = canvasX;
+                            g_startPoint.y = canvasY;
                             g_endPoint = g_startPoint;
                             g_isDrawing = true;
                         }
                     }
                     else {
-                        g_startPoint.x = x;
-                        g_startPoint.y = y;
+                        g_startPoint.x = canvasX;
+                        g_startPoint.y = canvasY;
                         g_endPoint = g_startPoint;
                         g_isDrawing = true;
                     }
@@ -2961,18 +2956,24 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     y >= g_canvasRect.top && y <= g_canvasRect.bottom) {
                     
                     // Convert to canvas coordinates
-                    x = x - g_canvasRect.left;
-                    y = y - g_canvasRect.top;
+                    int canvasX = x - g_canvasRect.left;
+                    int canvasY = y - g_canvasRect.top;
                     
                     // Handle clipping with right-click if we're in clipping mode
                     if (g_currentTool == ID_TOOL_CLIP) {
+                        // Debug info for coordinates
+                        wchar_t debugMsg[256];
+                        _snwprintf(debugMsg, 256, L"Right click at raw coords (%d, %d), canvas coords (%d, %d)", 
+                                   x, y, canvasX, canvasY);
+                        OutputDebugStringW(debugMsg);
+                        
                         if (g_currentAlgorithm == ID_ALGO_LINE_CLIPPING) {
-                            if (handleLineClippingInput(hwnd, x, y, true)) {
+                            if (handleLineClippingInput(hwnd, canvasX, canvasY, true)) {
                                 return 0;
                             }
                         }
                         else if (g_currentAlgorithm == ID_ALGO_POLYGON_CLIPPING) {
-                            if (handlePolygonClippingInput(hwnd, x, y, true)) {
+                            if (handlePolygonClippingInput(hwnd, canvasX, canvasY, true)) {
                                 return 0;
                             }
                         }

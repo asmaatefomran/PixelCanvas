@@ -1,5 +1,7 @@
 #pragma once
 #include <windows.h>
+#include "LineClipping.h"
+#include "PolygonClipping.h"
 
 // Function declarations for clipping operations
 extern bool clippingMode;
