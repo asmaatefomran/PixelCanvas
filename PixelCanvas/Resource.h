@@ -26,6 +26,7 @@
 #define IDC_COMBO_SHAPE     3003
 #define IDC_COMBO_QUARTER   3005
 #define IDC_BTN_FILL_COLOR  3006
+#define IDD_INPUTBOX 2000
 #ifndef IDC_STATIC
 #define IDC_STATIC				-1
 #endif

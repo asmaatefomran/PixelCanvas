@@ -17,9 +17,7 @@ struct Derivative {
 
 Curve::Curve(HDC hdc) : hdc(hdc) {}
 
-void Curve::DrawHermite(int x0, int y0, int x1, int y1, int t0, int t1, COLORREF color) {
-    double t0x = t0, t0y = t0;
-    double t1x = t1, t1y = t1;
+void Curve::DrawHermite(double x0, double y0, double x1, double y1, double t0x, double t0y, double t1x, double t1y, COLORREF color) {
     double h00, h10, h01, h11;
     for (double t = 0; t <= 1; t += 0.001) {
         h00 = 2 * t * t * t - 3 * t * t + 1;
@@ -33,26 +31,21 @@ void Curve::DrawHermite(int x0, int y0, int x1, int y1, int t0, int t1, COLORREF
     }
 }
 
-void DrawCardinalSpline(HDC hdc, vector<Point>& points, double c, COLORREF color) {
-    if (points.size() < 4) return;
-    Derivative t1 = { c * (points[2].x - points[0].x), c * (points[2].y - points[0].y) };
-    for (int i = 2; i < points.size() - 1; ++i) {
-        Derivative t2 = { c * (points[i+1].x - points[i].x), c * (points[i + 1].y - points[i].y)};
-        Point p1 = points[i-1];
-        Point p2 = points[i];
-        Derivative d1 = t1;
-        Derivative d2 = t2;
-        for (double t = 0; t <= 1; t += 0.001) {
-            double h00 = 2 * t * t * t - 3 * t * t + 1;
-            double h10 = t * t * t - 2 * t * t + t;
-            double h01 = -2 * t * t * t + 3 * t * t;
-            double h11 = t * t * t - t * t;
-            double x = h00 * p1.x + h10 * d1.u + h01 * p2.x + h11 * d2.u;
-            double y = h00 * p1.y + h10 * d1.v + h01 * p2.y + h11 * d2.v;
-            if (!clipWindowSet || (x >= clipMinX && x <= clipMaxX && y >= clipMinY && y <= clipMaxY))
-                SetPixel(hdc, round(x), round(y), color);
-        }
-        t1 = t2;
+void Curve::DrawCardinalSpline(POINT* pts, int n, double c, COLORREF color) {
+    if (n < 4) return;
+    struct Vector2 { double x, y; };
+    double c1 = 1 - c;
+    std::vector<Vector2> P;
+    for (int i = 0; i < n; ++i) P.push_back(Vector2{(double)pts[i].x, (double)pts[i].y});
+    Vector2 T0;
+    T0.x = c1 * (P[2].x - P[0].x);
+    T0.y = c1 * (P[2].y - P[0].y);
+    for (int i = 2; i < n - 1; i++) {
+        Vector2 T1;
+        T1.x = c1 * (P[i + 1].x - P[i - 1].x);
+        T1.y = c1 * (P[i + 1].y - P[i - 1].y);
+        DrawHermite(P[i - 1].x, P[i - 1].y, P[i].x, P[i].y, T0.x, T0.y, T1.x, T1.y, color);
+        T0 = T1;
     }
 }
 

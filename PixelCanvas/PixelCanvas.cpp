@@ -63,6 +63,10 @@ POINT clipWindowPoints[4];
 bool clipWindowSet = false;
 int clipMinX, clipMaxX, clipMinY, clipMaxY;
 
+int splinePointTarget = 0;
+
+FILE* fp;
+
 ATOM                MyRegisterClass(HINSTANCE hInstance);
 BOOL                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
@@ -270,11 +274,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         ShowWindow(hBtnFillColor, SW_HIDE); 
         currentX += buttonW2 + gap;
         
-        hBtnFinishSpline = CreateWindowW(L"BUTTON", L"Finish Spline", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-            currentX, buttonY, buttonW2, buttonH, hWnd, (HMENU)4001, hInst, NULL);
-        ShowWindow(hBtnFinishSpline, SW_HIDE);
-        currentX += buttonW2 + gap;
-
         hBtnFinishPolygon = CreateWindowW(L"BUTTON", L"Finish Polygon", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
             currentX, buttonY, buttonW2, buttonH, hWnd, (HMENU)4002, hInst, NULL);
         ShowWindow(hBtnFinishPolygon, SW_HIDE);
@@ -325,15 +324,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 SendMessageW(hComboAlgo, CB_ADDSTRING, 0, (LPARAM)L"Non-Recursive");
             } else if (currentShape == SHAPE_CARDINAL_SPLINE) {
                 SendMessageW(hComboAlgo, CB_ADDSTRING, 0, (LPARAM)L"Cardinal Spline");
-                ShowWindow(hBtnFinishSpline, SW_SHOW);
                 splinePointCount = 0;
-                ShowWindow(hBtnFinishPolygon, SW_HIDE);
             } else if (currentShape == SHAPE_POLYGON) {
                 SendMessageW(hComboAlgo, CB_ADDSTRING, 0, (LPARAM)L"Convex Fill");
                 SendMessageW(hComboAlgo, CB_ADDSTRING, 0, (LPARAM)L"General Fill");
-                ShowWindow(hBtnFinishPolygon, SW_SHOW);
                 polygonPointCount = 0;
-                ShowWindow(hBtnFinishSpline, SW_HIDE);
             } else if (currentShape == SHAPE_CLIP_WINDOW) {
                 SendMessageW(hComboAlgo, CB_ADDSTRING, 0, (LPARAM)L"Rectangle");
                 SendMessageW(hComboAlgo, CB_ADDSTRING, 0, (LPARAM)L"Square");
@@ -354,7 +349,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             }
             ShowWindow(GetDlgItem(hWnd, IDC_BTN_FILL_COLOR), showFill ? SW_SHOW : SW_HIDE);
             ShowWindow(hBtnFinishPolygon, (currentShape == SHAPE_POLYGON) ? SW_SHOW : SW_HIDE);
-            ShowWindow(hBtnFinishSpline, (currentShape == SHAPE_CARDINAL_SPLINE) ? SW_SHOW : SW_HIDE);
             shapeClickCount = 0;
             return 0;
         }
@@ -382,25 +376,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             }
             return 0;
         }
-        if (wmId == 4001) {
-            if (splinePointCount >= 4) {
-                Curve curve(hMemDC);
-                double s = 0.0; 
-                for (int i = 1; i < splinePointCount - 2; ++i) {
-                    int x0 = splinePoints[i].x;
-                    int y0 = splinePoints[i].y;
-                    int x1 = splinePoints[i + 1].x;
-                    int y1 = splinePoints[i + 1].y;
-                    int t0 = (int)(((1 - s) / 2) * (splinePoints[i + 1].x - splinePoints[i - 1].x));
-                    int t1 = (int)(((1 - s) / 2) * (splinePoints[i + 2].x - splinePoints[i].x));
-                    curve.DrawHermite(x0, y0, x1, y1, t0, t1, g_LineColor);
-                }
-                InvalidateRect(hWnd, NULL, FALSE);
-            }
-            splinePointCount = 0;
-            ShowWindow(hBtnFinishSpline, SW_HIDE);
-            return 0;
-        }
         if (wmId == 4002) {
             if (polygonPointCount >= 3) {
                 int algoSel = (int)SendMessageW(hComboAlgo, CB_GETCURSEL, 0, 0);
@@ -420,6 +395,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             return 0;
         }
         if (wmId == IDC_COMBO_ALGO && HIWORD(wParam) == CBN_SELCHANGE) {
+            if (currentShape == SHAPE_CARDINAL_SPLINE) {
+                AllocConsole();
+                freopen_s(&fp, "CONIN$", "r", stdin);
+                printf("Enter number of points for Cardinal Spline (min 4, max 100): ");
+                int n = 0;
+                while (n < 4 || n > 100) {
+                    scanf_s("%d", &n);
+                    if (n < 4 || n > 100) printf("Invalid. Enter a number between 4 and 100: ");
+                }
+                splinePointCount = 0;
+                splinePointTarget = n;
+                FreeConsole();
+            }
             bool showFill = false;
             if (currentShape == SHAPE_POLYGON || currentShape == SHAPE_FLOODFILL || currentShape == SHAPE_SQUARE || currentShape == SHAPE_RECTANGLE || currentShape == SHAPE_CIRCLE_QUARTER || currentShape == SHAPE_ELLIPSE) {
                 showFill = true;
@@ -584,10 +572,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             return 0;
         }
         if (currentShape == SHAPE_CARDINAL_SPLINE) {
-            if (splinePointCount < 100) {
+            if (splinePointCount < splinePointTarget) {
                 splinePoints[splinePointCount].x = x;
                 splinePoints[splinePointCount].y = y;
                 splinePointCount++;
+                if (splinePointCount == splinePointTarget) {
+                    Curve curve(hMemDC);
+                    curve.DrawCardinalSpline(splinePoints, splinePointTarget, 0.0, g_LineColor);
+                    InvalidateRect(hWnd, NULL, FALSE);
+                    splinePointCount = 0;
+                    splinePointTarget = 0;
+                }
             }
             return 0;
         }
