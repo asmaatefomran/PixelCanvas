@@ -19,4 +19,4 @@ private:
     HDC hdc;
 };
 
-#endif // LINE_H 
+#endif 

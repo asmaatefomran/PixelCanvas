@@ -17,4 +17,4 @@ void convexfill(HDC hdc, point p[], int n, COLORREF c);
 void myFloodFill(HDC hdc, int x, int y, COLORREF bc, COLORREF fc);
 void myFloodFillqueue(HDC hdc, int x, int y, COLORREF bc, COLORREF fc);
 
-#endif // POLYGONFILL_H 
+#endif 

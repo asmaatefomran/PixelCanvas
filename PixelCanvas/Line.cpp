@@ -6,12 +6,11 @@ using namespace std;
 extern bool clipWindowSet;
 extern int clipMinX, clipMaxX, clipMinY, clipMaxY;
 
-// Cohen-Sutherland region codes
-const int INSIDE = 0; // 0000
-const int LEFT = 1;   // 0001
-const int RIGHT = 2;  // 0010
-const int BOTTOM = 4; // 0100
-const int TOP = 8;    // 1000
+const int INSIDE = 0; 
+const int LEFT = 1;   
+const int RIGHT = 2;  
+const int BOTTOM = 4; 
+const int TOP = 8;    
 
 int ComputeOutCode(int x, int y) {
     int code = INSIDE;
@@ -22,7 +21,6 @@ int ComputeOutCode(int x, int y) {
     return code;
 }
 
-// Cohen-Sutherland line clipper
 bool CohenSutherlandClip(int& x0, int& y0, int& x1, int& y1) {
     if (!clipWindowSet) return true;
     int outcode0 = ComputeOutCode(x0, y0);
@@ -158,4 +156,4 @@ COLORREF Line::Mix(COLORREF c1, COLORREF c2, float t) {
     int g = GetGValue(c1) + t * (GetGValue(c2) - GetGValue(c1));
     int b = GetBValue(c1) + t * (GetBValue(c2) - GetBValue(c1));
     return RGB(r, g, b);
-} 
+}

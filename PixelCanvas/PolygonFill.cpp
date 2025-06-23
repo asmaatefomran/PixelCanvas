@@ -2,7 +2,6 @@
 #include <cmath>
 #include <vector>
 
-// Externally defined in PixelCanvas.cpp
 extern bool clipWindowSet;
 extern int clipMinX, clipMaxX, clipMinY, clipMaxY;
 
@@ -201,18 +200,16 @@ void cleanupEdgeTable(EdgeNode* tbl[]) {
     }
 }
 
-// Sutherland-Hodgman polygon clipping for rectangle
 std::vector<point> ClipPolygonToRect(const point* poly, int n) {
     std::vector<point> input(poly, poly + n);
     std::vector<point> output;
     if (!clipWindowSet) return input;
-    // Clip against each edge: left, right, bottom, top
     struct Edge { int x1, y1, x2, y2; };
     Edge edges[4] = {
-        {clipMinX, clipMinY, clipMinX, clipMaxY}, // Left
-        {clipMaxX, clipMinY, clipMaxX, clipMaxY}, // Right
-        {clipMinX, clipMinY, clipMaxX, clipMinY}, // Bottom
-        {clipMinX, clipMaxY, clipMaxX, clipMaxY}  // Top
+        {clipMinX, clipMinY, clipMinX, clipMaxY}, 
+        {clipMaxX, clipMinY, clipMaxX, clipMaxY}, 
+        {clipMinX, clipMinY, clipMaxX, clipMinY}, 
+        {clipMinX, clipMaxY, clipMaxX, clipMaxY}  
     };
     auto inside = [](const point& p, int edge) {
         switch (edge) {
@@ -227,19 +224,19 @@ std::vector<point> ClipPolygonToRect(const point* poly, int n) {
         double x = 0, y = 0;
         double dx = p2.x - p1.x, dy = p2.y - p1.y;
         switch (edge) {
-            case 0: // Left
+            case 0: 
                 x = clipMinX;
                 y = p1.y + dy * (clipMinX - p1.x) / dx;
                 break;
-            case 1: // Right
+            case 1: 
                 x = clipMaxX;
                 y = p1.y + dy * (clipMaxX - p1.x) / dx;
                 break;
-            case 2: // Bottom
+            case 2: 
                 y = clipMinY;
                 x = p1.x + dx * (clipMinY - p1.y) / dy;
                 break;
-            case 3: // Top
+            case 3: 
                 y = clipMaxY;
                 x = p1.x + dx * (clipMaxY - p1.y) / dy;
                 break;
@@ -248,31 +245,35 @@ std::vector<point> ClipPolygonToRect(const point* poly, int n) {
     };
     for (int e = 0; e < 4; ++e) {
         output.clear();
-        for (size_t i = 0; i < input.size(); ++i) {
-            point curr = input[i];
-            point prev = input[(i + input.size() - 1) % input.size()];
-            bool currIn = inside(curr, e);
-            bool prevIn = inside(prev, e);
-            if (currIn) {
-                if (!prevIn) output.push_back(intersect(prev, curr, e));
-                output.push_back(curr);
-            } else if (prevIn) {
-                output.push_back(intersect(prev, curr, e));
+        if (input.empty()) break;
+        point p1 = input.back();
+        for (const auto& p2 : input) {
+            bool p1_inside = inside(p1, e);
+            bool p2_inside = inside(p2, e);
+            if (p1_inside && p2_inside) {
+                output.push_back(p2);
             }
+            else if (p1_inside && !p2_inside) {
+                output.push_back(intersect(p1, p2, e));
+            }
+            else if (!p1_inside && p2_inside) {
+                output.push_back(intersect(p1, p2, e));
+                output.push_back(p2);
+            }
+            p1 = p2;
         }
         input = output;
     }
-    return input;
+    return output;
 }
 
 void fillGeneralPolygon(HDC hdc, point p[], int n, COLORREF c) {
-    std::vector<point> clipped = ClipPolygonToRect(p, n);
-    if (clipped.size() < 3) return;
-    EdgeNode* tbl[800];
-    initEdgeTable(tbl);
-    buildPolygonEdgeTable(tbl, clipped.data(), (int)clipped.size());
-    renderPolygonFromTable(hdc, tbl, c);
-    cleanupEdgeTable(tbl);
+    std::vector<point> clippedPoly = ClipPolygonToRect(p, n);
+    if (clippedPoly.size() < 3) return;
+    initEdgeTable(edgeTable);
+    buildPolygonEdgeTable(edgeTable, clippedPoly.data(), clippedPoly.size());
+    renderPolygonFromTable(hdc, edgeTable, c);
+    cleanupEdgeTable(edgeTable);
 }
 
 struct EdgeTableEntry {
@@ -280,102 +281,78 @@ struct EdgeTableEntry {
 };
 
 void init(EdgeTableEntry tbl[800]) {
-    for (int i = 0;i < 800;i++) {
+    for (int i = 0; i < 800; i++) {
         tbl[i].left = INT_MAX;
         tbl[i].right = INT_MIN;
     }
 }
-
 void edge2table(EdgeTableEntry tbl[800], point v1, point v2){
     if (v1.y == v2.y)
         return;
     if (v1.y > v2.y)
         std::swap(v1, v2);
-    int y = (int)v1.y;
-    double x = v1.x;
-    double mi = (v2.x - v1.x) / (v2.y - v1.y);
-    while (y < v2.y) {
-        if (x < tbl[y].left)
-            tbl[y].left = (int)ceil(x);
-        if (x > tbl[y].right)
-            tbl[y].right = (int)floor(x);
-        y++;
-        x += mi;
+    int ymin = (int)ceil(v1.y);
+    int ymax = (int)floor(v2.y);
+    if (ymin >= ymax)
+        return;
+    double dx = (v2.x - v1.x) / (v2.y - v1.y);
+    double x = v1.x + dx * (ymin - v1.y);
+    for (int y = ymin; y < ymax; y++)
+    {
+        if (x < tbl[y].left) tbl[y].left = (int)ceil(x);
+        if (x > tbl[y].right) tbl[y].right = (int)floor(x);
+        x += dx;
     }
 }
-
 void polygon2table(EdgeTableEntry tbl[800], point p[], int n) {
     point v1 = p[n - 1];
-    for (int i = 0;i < n;i++) {
+    for (int i = 0; i < n; i++) {
         point v2 = p[i];
         edge2table(tbl, v1, v2);
         v1 = p[i];
     }
 }
-
 void table2screen(HDC hdc, EdgeTableEntry tbl[800], COLORREF c) {
-    for (int i = 0;i < 800;i++) {
-        if (tbl[i].left < tbl[i].right)
-            DrawLineDDA(hdc, tbl[i].left, (int)i, tbl[i].right, (int)i, c);
+    for (int y = 0; y < 800; y++) {
+        if (tbl[y].left < tbl[y].right)
+            DrawLineDDA(hdc, tbl[y].left, y, tbl[y].right, y, c);
     }
 }
-
 void convexfill(HDC hdc, point p[], int n, COLORREF c) {
-    std::vector<point> clipped = ClipPolygonToRect(p, n);
-    if (clipped.size() < 3) return;
+    std::vector<point> clippedPoly = ClipPolygonToRect(p, n);
+    if (clippedPoly.size() < 3) return;
     EdgeTableEntry tbl[800];
     init(tbl);
-    polygon2table(tbl, clipped.data(), (int)clipped.size());
+    polygon2table(tbl, clippedPoly.data(), clippedPoly.size());
     table2screen(hdc, tbl, c);
 }
 
-void myFloodFill(HDC hdc, int x, int y, COLORREF bc, COLORREF fc) {
+void myFloodFill(HDC hdc, int x, int y, COLORREF bc, COLORREF fc)
+{
     COLORREF c = GetPixel(hdc, x, y);
     if (c == bc || c == fc)
         return;
-    if (!clipWindowSet || (x >= clipMinX && x <= clipMaxX && y >= clipMinY && y <= clipMaxY))
-        SetPixel(hdc, x, y, fc);
+    SetPixel(hdc, x, y, fc);
     myFloodFill(hdc, x + 1, y, bc, fc);
     myFloodFill(hdc, x - 1, y, bc, fc);
     myFloodFill(hdc, x, y + 1, bc, fc);
     myFloodFill(hdc, x, y - 1, bc, fc);
 }
 
-void myFloodFillqueue(HDC hdc, int x, int y, COLORREF bc, COLORREF fc) {
+void myFloodFillqueue(HDC hdc, int x, int y, COLORREF bc, COLORREF fc)
+{
     std::queue<point> q;
     q.push(point(x, y));
-    if (!clipWindowSet || (x >= clipMinX && x <= clipMaxX && y >= clipMinY && y <= clipMaxY))
-        SetPixel(hdc, x, y, fc); // Mark as filled immediately
     while (!q.empty()) {
         point p = q.front();
         q.pop();
-        // Right
-        COLORREF c = GetPixel(hdc, p.x + 1, p.y);
-        if (c != bc && c != fc) {
-            if (!clipWindowSet || (p.x + 1 >= clipMinX && p.x + 1 <= clipMaxX && p.y >= clipMinY && p.y <= clipMaxY))
-                SetPixel(hdc, p.x + 1, p.y, fc);
-            q.push(point(p.x + 1, p.y));
-        }
-        // Left
-        c = GetPixel(hdc, p.x - 1, p.y);
-        if (c != bc && c != fc) {
-            if (!clipWindowSet || (p.x - 1 >= clipMinX && p.x - 1 <= clipMaxX && p.y >= clipMinY && p.y <= clipMaxY))
-                SetPixel(hdc, p.x - 1, p.y, fc);
-            q.push(point(p.x - 1, p.y));
-        }
-        // Down
-        c = GetPixel(hdc, p.x, p.y + 1);
-        if (c != bc && c != fc) {
-            if (!clipWindowSet || (p.x >= clipMinX && p.x <= clipMaxX && p.y + 1 >= clipMinY && p.y + 1 <= clipMaxY))
-                SetPixel(hdc, p.x, p.y + 1, fc);
-            q.push(point(p.x, p.y + 1));
-        }
-        // Up
-        c = GetPixel(hdc, p.x, p.y - 1);
-        if (c != bc && c != fc) {
-            if (!clipWindowSet || (p.x >= clipMinX && p.x <= clipMaxX && p.y - 1 >= clipMinY && p.y - 1 <= clipMaxY))
-                SetPixel(hdc, p.x, p.y - 1, fc);
-            q.push(point(p.x, p.y - 1));
-        }
+        COLORREF c = GetPixel(hdc, p.x, p.y);
+        if (c == bc || c == fc)
+            continue;
+        SetPixel(hdc, p.x, p.y, fc);
+        q.push(point(p.x + 1, p.y));
+        q.push(point(p.x - 1, p.y));
+        q.push(point(p.x, p.y + 1));
+        q.push(point(p.x, p.y - 1));
     }
-} 
+}

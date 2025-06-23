@@ -16,4 +16,4 @@ private:
     HDC hdc;
 };
 
-#endif // CURVE_H 
+#endif 

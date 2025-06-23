@@ -10,91 +10,59 @@
 
 #define MAX_LOADSTRING 100
 
-// Global Variables:
-HINSTANCE hInst;                                // current instance
-WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
-WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
+HINSTANCE hInst;                                
+WCHAR szTitle[MAX_LOADSTRING];                  
+WCHAR szWindowClass[MAX_LOADSTRING];            
 
-// Canvas parameters
 const int canvasWidth = 1200;
 const int canvasHeight = 600;
 
-// Pixel drawing globals
 HBITMAP hBitmap = NULL;
-BYTE* pPixels = NULL; // pointer to pixel bits
-HDC hMemDC = NULL;    // memory DC for the bitmap
+BYTE* pPixels = NULL; 
+HDC hMemDC = NULL;    
 BITMAPINFO bmi = { 0 };
 
-// Drawing state
 enum DrawMode { MODE_NONE, MODE_LINE };
 DrawMode currentMode = MODE_NONE;
 
-// Line drawing points
 POINT lineStart = { -1, -1 };
 POINT lineEnd = { -1, -1 };
 
-// Add a variable to track the current line algorithm
 enum LineAlgorithm { LINE_DDA, LINE_MIDPOINT, LINE_PARAMETRIC };
 LineAlgorithm currentLineAlgorithm = LINE_DDA;
 
-// Add a global HWND for the combo box
 HWND hComboAlgo = NULL;
 
-// Add a constant for the top offset (height of the combo box)
-const int topOffset = 40; // Adjust as needed for your combo box height
+const int topOffset = 40; 
 
-// Add a flag to track if we are waiting for the second right click
 bool waitingForSecondClick = false;
 
-// Add a global variable for the selected color
 COLORREF g_LineColor = RGB(0, 0, 0);
 
-// Add global HWNDs for the shape and algorithm combo boxes
 HWND hComboShape = NULL;
 
-// Add enums for shape and algorithm selection
 enum ShapeType { SHAPE_LINE, SHAPE_CIRCLE, SHAPE_CIRCLE_QUARTER, SHAPE_SQUARE, SHAPE_RECTANGLE, SHAPE_FLOODFILL, SHAPE_CARDINAL_SPLINE, SHAPE_POLYGON, SHAPE_CLIP_WINDOW, SHAPE_ELLIPSE };
 ShapeType currentShape = SHAPE_LINE;
 
-// Add this near the top of the file, after global variables
 static HBRUSH hDarkMenuBrush = NULL;
 
-// Add global variables for storing up to 4 points
 POINT shapePoints[4];
 int shapeClickCount = 0;
 
-// Add a global variable for the fill color
 COLORREF g_FillColor = RGB(255, 0, 0);
 
-// Add global variables for Cardinal Spline
 POINT splinePoints[100];
 int splinePointCount = 0;
 HWND hBtnFinishSpline = NULL;
 
-// Add global variables for Polygon
 POINT polygonPoints[100];
 int polygonPointCount = 0;
 HWND hBtnFinishPolygon = NULL;
 
-// Clipping window state
 POINT clipWindowPoints[4];
 bool clipWindowSet = false;
-bool clipWindowIsSquare = false;
 int clipMinX, clipMaxX, clipMinY, clipMaxY;
 
-void UpdateClipWindowBounds() {
-    clipMinX = min(min(clipWindowPoints[0].x, clipWindowPoints[1].x), min(clipWindowPoints[2].x, clipWindowPoints[3].x));
-    clipMaxX = max(max(clipWindowPoints[0].x, clipWindowPoints[1].x), max(clipWindowPoints[2].x, clipWindowPoints[3].x));
-    clipMinY = min(min(clipWindowPoints[0].y, clipWindowPoints[1].y), min(clipWindowPoints[2].y, clipWindowPoints[3].y));
-    clipMaxY = max(max(clipWindowPoints[0].y, clipWindowPoints[1].y), max(clipWindowPoints[2].y, clipWindowPoints[3].y));
-    if (clipWindowIsSquare) {
-        int side = max(clipMaxX - clipMinX, clipMaxY - clipMinY);
-        clipMaxX = clipMinX + side;
-        clipMaxY = clipMinY + side;
-    }
-}
-
-// Forward declarations of functions included in this code module:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
 BOOL                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
@@ -162,7 +130,6 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
     hInst = hInstance;
 
-    // Create window with fixed size + borders for canvas
     HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
         CW_USEDEFAULT, CW_USEDEFAULT, canvasWidth + 16, canvasHeight + 39, nullptr, nullptr, hInstance, nullptr);
 
@@ -189,7 +156,6 @@ void DrawPixel(int x, int y, COLORREF color)
     pixel[3] = 255;
 }
 
-// Bresenham's line algorithm for drawing on bitmap pixels
 void DrawLineOnBitmap(POINT start, POINT end, COLORREF color)
 {
     int x0 = start.x;
@@ -224,7 +190,6 @@ void DrawLineOnBitmap(POINT start, POINT end, COLORREF color)
 
 void DrawPreviewLine(HWND hWnd, HDC hdc, POINT start, POINT end)
 {
-    // Draw rubber-band line in XOR mode to show preview
     SetROP2(hdc, R2_NOTXORPEN);
     HPEN hPen = CreatePen(PS_SOLID, 1, RGB(0, 0, 0));
     HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
@@ -246,17 +211,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         hMemDC = CreateCompatibleDC(hdc);
         bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
         bmi.bmiHeader.biWidth = canvasWidth;
-        bmi.bmiHeader.biHeight = -canvasHeight; // top-down
+        bmi.bmiHeader.biHeight = -canvasHeight; 
         bmi.bmiHeader.biPlanes = 1;
         bmi.bmiHeader.biBitCount = 32;
         bmi.bmiHeader.biCompression = BI_RGB;
         hBitmap = CreateDIBSection(hMemDC, &bmi, DIB_RGB_COLORS, (void**)&pPixels, NULL, 0);
         SelectObject(hMemDC, hBitmap);
         if (pPixels)
-            memset(pPixels, 255, canvasWidth * canvasHeight * 4); // Set background to white
+            memset(pPixels, 255, canvasWidth * canvasHeight * 4); 
         ReleaseDC(hWnd, hdc);
 
-        // Create the shape selection combo box
         hComboShape = CreateWindowW(L"COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_TABSTOP,
             10, 10, 120, 200, hWnd, (HMENU)IDC_COMBO_SHAPE, hInst, NULL);
         SendMessageW(hComboShape, CB_ADDSTRING, 0, (LPARAM)L"Line");
@@ -269,56 +233,57 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         SendMessageW(hComboShape, CB_ADDSTRING, 0, (LPARAM)L"Polygon");
         SendMessageW(hComboShape, CB_ADDSTRING, 0, (LPARAM)L"Clipping Window");
         SendMessageW(hComboShape, CB_ADDSTRING, 0, (LPARAM)L"Ellipse");
-        SendMessageW(hComboShape, CB_SETCURSEL, 0, 0); // Default to Line
+        SendMessageW(hComboShape, CB_SETCURSEL, 0, 0); 
 
-        // Create the algorithm selection combo box (move it to the right of shape combo)
         hComboAlgo = CreateWindowW(L"COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_TABSTOP,
             140, 10, 150, 200, hWnd, (HMENU)IDC_COMBO_ALGO, hInst, NULL);
-        // Add line algorithms by default
         SendMessageW(hComboAlgo, CB_ADDSTRING, 0, (LPARAM)L"DDA");
         SendMessageW(hComboAlgo, CB_ADDSTRING, 0, (LPARAM)L"Midpoint");
         SendMessageW(hComboAlgo, CB_ADDSTRING, 0, (LPARAM)L"Parametric");
         SendMessageW(hComboAlgo, CB_SETCURSEL, 0, 0);
 
-        // Combo boxes: shape (10,10,120,200), algo (140,10,150,200)
-        int buttonStartX = 310; // right of both combo boxes
+        int buttonStartX = 310; 
+        int currentX = buttonStartX;
         int buttonY = 10;
         int buttonH = 24;
-        int buttonW1 = 80; // Save, Load
-        int buttonW2 = 120; // Clear, Color, Fill Color
+        int buttonW1 = 80; 
+        int buttonW2 = 120; 
         int gap = 10;
-        // Add the 'Save' button first
         HWND hBtnSave = CreateWindowW(L"BUTTON", L"Save", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-            buttonStartX, buttonY, buttonW1, buttonH, hWnd, (HMENU)4004, hInst, NULL);
-        // Add the 'Load' button next
-        HWND hBtnLoad = CreateWindowW(L"BUTTON", L"Load", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-            buttonStartX + buttonW1 + gap, buttonY, buttonW1, buttonH, hWnd, (HMENU)4005, hInst, NULL);
-        // Add the 'Clear Screen' button
-        HWND hBtnClear = CreateWindowW(L"BUTTON", L"Clear Screen", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-            buttonStartX + 2 * (buttonW1 + gap), buttonY, buttonW2, buttonH, hWnd, (HMENU)4003, hInst, NULL);
-        // Add the 'Choose Color' button
-        HWND hBtnColor = CreateWindowW(L"BUTTON", L"Choose Color", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-            buttonStartX + 2 * (buttonW1 + gap) + buttonW2 + gap, buttonY, buttonW2, buttonH, hWnd, (HMENU)IDC_BTN_COLOR, hInst, NULL);
-        // Add the 'Fill Color' button (if it appears)
-        HWND hBtnFillColor = CreateWindowW(L"BUTTON", L"Choose Fill Color", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-            buttonStartX + 2 * (buttonW1 + gap) + 2 * (buttonW2 + gap), buttonY, buttonW2, buttonH, hWnd, (HMENU)IDC_BTN_FILL_COLOR, hInst, NULL);
-        ShowWindow(hBtnFillColor, SW_HIDE); // Hide by default
-        // Add the 'Finish Polygon' button to the right of fill color
-        hBtnFinishPolygon = CreateWindowW(L"BUTTON", L"Finish Polygon", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-            570, 10, 120, 24, hWnd, (HMENU)4002, hInst, NULL);
-        ShowWindow(hBtnFinishPolygon, SW_HIDE);
+            currentX, buttonY, buttonW1, buttonH, hWnd, (HMENU)4004, hInst, NULL);
+        currentX += buttonW1 + gap;
 
-        // Add the 'Finish Spline' button (hidden by default) right next to the 'Choose Fill Color' button, with the same gap
+        HWND hBtnLoad = CreateWindowW(L"BUTTON", L"Load", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+            currentX, buttonY, buttonW1, buttonH, hWnd, (HMENU)4005, hInst, NULL);
+        currentX += buttonW1 + gap;
+
+        HWND hBtnClear = CreateWindowW(L"BUTTON", L"Clear Screen", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+            currentX, buttonY, buttonW2, buttonH, hWnd, (HMENU)4003, hInst, NULL);
+        currentX += buttonW2 + gap;
+
+        HWND hBtnColor = CreateWindowW(L"BUTTON", L"Choose Color", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+            currentX, buttonY, buttonW2, buttonH, hWnd, (HMENU)IDC_BTN_COLOR, hInst, NULL);
+        currentX += buttonW2 + gap;
+
+        HWND hBtnFillColor = CreateWindowW(L"BUTTON", L"Choose Fill Color", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+            currentX, buttonY, buttonW2, buttonH, hWnd, (HMENU)IDC_BTN_FILL_COLOR, hInst, NULL);
+        ShowWindow(hBtnFillColor, SW_HIDE); 
+        currentX += buttonW2 + gap;
+        
         hBtnFinishSpline = CreateWindowW(L"BUTTON", L"Finish Spline", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-            buttonStartX + 2 * (buttonW1 + gap) + 3 * (buttonW2 + gap), buttonY, buttonW2, buttonH, hWnd, (HMENU)4001, hInst, NULL);
+            currentX, buttonY, buttonW2, buttonH, hWnd, (HMENU)4001, hInst, NULL);
         ShowWindow(hBtnFinishSpline, SW_HIDE);
+        currentX += buttonW2 + gap;
+
+        hBtnFinishPolygon = CreateWindowW(L"BUTTON", L"Finish Polygon", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+            currentX, buttonY, buttonW2, buttonH, hWnd, (HMENU)4002, hInst, NULL);
+        ShowWindow(hBtnFinishPolygon, SW_HIDE);
     }
     break;
 
     case WM_COMMAND:
     {
         int wmId = LOWORD(wParam);
-        // Handle shape combo box selection change
         if (wmId == IDC_COMBO_SHAPE && HIWORD(wParam) == CBN_SELCHANGE) {
             int sel = (int)SendMessageW(hComboShape, CB_GETCURSEL, 0, 0);
             if (sel == 0) currentShape = SHAPE_LINE;
@@ -331,7 +296,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             else if (sel == 7) currentShape = SHAPE_POLYGON;
             else if (sel == 8) currentShape = SHAPE_CLIP_WINDOW;
             else if (sel == 9) currentShape = SHAPE_ELLIPSE;
-            // Update algorithm combo box
             SendMessageW(hComboAlgo, CB_RESETCONTENT, 0, 0);
             if (currentShape == SHAPE_LINE) {
                 SendMessageW(hComboAlgo, CB_ADDSTRING, 0, (LPARAM)L"DDA");
@@ -380,7 +344,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 SendMessageW(hComboAlgo, CB_ADDSTRING, 0, (LPARAM)L"Midpoint");
                 SendMessageW(hComboAlgo, CB_SETCURSEL, 0, 0);
             }
-            // Show/hide fill color button based on shape
             bool showFill = false;
             if (currentShape == SHAPE_POLYGON || currentShape == SHAPE_FLOODFILL || currentShape == SHAPE_SQUARE || currentShape == SHAPE_RECTANGLE || currentShape == SHAPE_CIRCLE_QUARTER || currentShape == SHAPE_ELLIPSE) {
                 showFill = true;
@@ -390,7 +353,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 if (selAlgo >= 5) showFill = true;
             }
             ShowWindow(GetDlgItem(hWnd, IDC_BTN_FILL_COLOR), showFill ? SW_SHOW : SW_HIDE);
-            // Show/hide finish buttons
             ShowWindow(hBtnFinishPolygon, (currentShape == SHAPE_POLYGON) ? SW_SHOW : SW_HIDE);
             ShowWindow(hBtnFinishSpline, (currentShape == SHAPE_CARDINAL_SPLINE) ? SW_SHOW : SW_HIDE);
             shapeClickCount = 0;
@@ -420,11 +382,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             }
             return 0;
         }
-        // Handle Finish Spline button
         if (wmId == 4001) {
             if (splinePointCount >= 4) {
                 Curve curve(hMemDC);
-                double s = 0.0; // Tension parameter (0 = Catmull-Rom)
+                double s = 0.0; 
                 for (int i = 1; i < splinePointCount - 2; ++i) {
                     int x0 = splinePoints[i].x;
                     int y0 = splinePoints[i].y;
@@ -440,7 +401,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             ShowWindow(hBtnFinishSpline, SW_HIDE);
             return 0;
         }
-        // Handle Finish Polygon button
         if (wmId == 4002) {
             if (polygonPointCount >= 3) {
                 int algoSel = (int)SendMessageW(hComboAlgo, CB_GETCURSEL, 0, 0);
@@ -459,9 +419,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             ShowWindow(hBtnFinishPolygon, SW_HIDE);
             return 0;
         }
-        // Handle algorithm combo box selection change
         if (wmId == IDC_COMBO_ALGO && HIWORD(wParam) == CBN_SELCHANGE) {
-            // Show/hide fill color button based on shape and algorithm
             bool showFill = false;
             if (currentShape == SHAPE_POLYGON || currentShape == SHAPE_FLOODFILL || currentShape == SHAPE_SQUARE || currentShape == SHAPE_RECTANGLE || currentShape == SHAPE_CIRCLE_QUARTER || currentShape == SHAPE_ELLIPSE) {
                 showFill = true;
@@ -471,15 +429,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             }
             ShowWindow(GetDlgItem(hWnd, IDC_BTN_FILL_COLOR), showFill ? SW_SHOW : SW_HIDE);
         }
-        if (wmId == 4003) { // Clear Screen button
+        if (wmId == 4003) { 
             if (pPixels) {
-                memset(pPixels, 255, canvasWidth * canvasHeight * 4); // Set background to white
-                clipWindowSet = false; // Remove any clipping restrictions
+                memset(pPixels, 255, canvasWidth * canvasHeight * 4); 
+                clipWindowSet = false; 
                 InvalidateRect(hWnd, NULL, FALSE);
             }
             return 0;
         }
-        if (wmId == 4004) { // Save button
+        if (wmId == 4004) { 
             OPENFILENAME ofn = { sizeof(OPENFILENAME) };
             WCHAR szFile[MAX_PATH] = L"";
             ofn.hwndOwner = hWnd;
@@ -489,11 +447,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
             ofn.lpstrDefExt = L"bmp";
             if (GetSaveFileName(&ofn)) {
-                // Save the bitmap to file
                 BITMAPFILEHEADER bfh = { 0 };
                 BITMAPINFOHEADER bih = bmi.bmiHeader;
                 DWORD dwBmpSize = canvasWidth * canvasHeight * 4;
-                bfh.bfType = 0x4D42; // 'BM'
+                bfh.bfType = 0x4D42; 
                 bfh.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
                 bfh.bfSize = bfh.bfOffBits + dwBmpSize;
                 HANDLE hFile = CreateFile(ofn.lpstrFile, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -504,7 +461,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     WriteFile(hFile, pPixels, dwBmpSize, &dwWritten, NULL);
                     CloseHandle(hFile);
                 }
-                // Save clipping state to .txt
                 WCHAR txtFile[MAX_PATH];
                 wcscpy_s(txtFile, szFile);
                 WCHAR* dot = wcsrchr(txtFile, L'.');
@@ -512,15 +468,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 else wcscat_s(txtFile, MAX_PATH, L".txt");
                 FILE* f = nullptr;
                 if (_wfopen_s(&f, txtFile, L"w") == 0 && f) {
-                    fprintf(f, "%d %d ", clipWindowSet ? 1 : 0, clipWindowIsSquare ? 1 : 0);
-                    for (int i = 0; i < 4; ++i) fprintf(f, "%d %d ", clipWindowPoints[i].x, clipWindowPoints[i].y);
-                    fprintf(f, "\n");
+                    fprintf(f, "%d %d %d %d %d\n", clipWindowSet ? 1 : 0, clipMinX, clipMinY, clipMaxX, clipMaxY);
                     fclose(f);
                 }
             }
             return 0;
         }
-        if (wmId == 4005) { // Load button
+        if (wmId == 4005) { 
             OPENFILENAME ofn = { sizeof(OPENFILENAME) };
             WCHAR szFile[MAX_PATH] = L"";
             ofn.hwndOwner = hWnd;
@@ -543,7 +497,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     }
                     CloseHandle(hFile);
                 }
-                // Load clipping state from .txt
                 WCHAR txtFile[MAX_PATH];
                 wcscpy_s(txtFile, szFile);
                 WCHAR* dot = wcsrchr(txtFile, L'.');
@@ -551,16 +504,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 else wcscat_s(txtFile, MAX_PATH, L".txt");
                 FILE* f = nullptr;
                 if (_wfopen_s(&f, txtFile, L"r") == 0 && f) {
-                    int set, square;
-                    int pts[8];
-                    if (fscanf_s(f, "%d %d %d %d %d %d %d %d %d %d %d %d", &set, &square, &pts[0], &pts[1], &pts[2], &pts[3], &pts[4], &pts[5], &pts[6], &pts[7]) >= 10) {
+                    int set = 0;
+                    if (fscanf_s(f, "%d %d %d %d %d", &set, &clipMinX, &clipMinY, &clipMaxX, &clipMaxY) >= 5) {
                         clipWindowSet = (set != 0);
-                        clipWindowIsSquare = (square != 0);
-                        for (int i = 0; i < 4; ++i) {
-                            clipWindowPoints[i].x = pts[i * 2];
-                            clipWindowPoints[i].y = pts[i * 2 + 1];
-                        }
-                        UpdateClipWindowBounds();
+                    } else {
+                        clipWindowSet = false;
                     }
                     fclose(f);
                 }
@@ -594,36 +542,31 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             shapePoints[shapeClickCount].y = y;
             shapeClickCount++;
             if (shapeClickCount < 4) return 0;
-            // On the 4th click, fill the shape
             int algoSel = (int)SendMessageW(hComboAlgo, CB_GETCURSEL, 0, 0);
             Curve curve(hMemDC);
             if (currentShape == SHAPE_SQUARE) {
-                // Find bounding box and make it a square
                 int minX = min(min(shapePoints[0].x, shapePoints[1].x), min(shapePoints[2].x, shapePoints[3].x));
                 int maxX = max(max(shapePoints[0].x, shapePoints[1].x), max(shapePoints[2].x, shapePoints[3].x));
                 int minY = min(min(shapePoints[0].y, shapePoints[1].y), min(shapePoints[2].y, shapePoints[3].y));
                 int maxY = max(max(shapePoints[0].y, shapePoints[1].y), max(shapePoints[2].y, shapePoints[3].y));
                 int side = max(maxX - minX, maxY - minY);
                 curve.FillWithHermite(minX, minY, minX + side, minY + side, g_LineColor);
-                // Draw borders
                 Line line(hMemDC);
-                line.DrawLineDDA(minX, minY, minX + side, minY, g_LineColor); // Top
-                line.DrawLineDDA(minX + side, minY, minX + side, minY + side, g_LineColor); // Right
-                line.DrawLineDDA(minX + side, minY + side, minX, minY + side, g_LineColor); // Bottom
-                line.DrawLineDDA(minX, minY + side, minX, minY, g_LineColor); // Left
+                line.DrawLineDDA(minX, minY, minX + side, minY, g_LineColor); 
+                line.DrawLineDDA(minX + side, minY, minX + side, minY + side, g_LineColor); 
+                line.DrawLineDDA(minX + side, minY + side, minX, minY + side, g_LineColor); 
+                line.DrawLineDDA(minX, minY + side, minX, minY, g_LineColor); 
             } else if (currentShape == SHAPE_RECTANGLE) {
-                // Find bounding box
                 int minX = min(min(shapePoints[0].x, shapePoints[1].x), min(shapePoints[2].x, shapePoints[3].x));
                 int maxX = max(max(shapePoints[0].x, shapePoints[1].x), max(shapePoints[2].x, shapePoints[3].x));
                 int minY = min(min(shapePoints[0].y, shapePoints[1].y), min(shapePoints[2].y, shapePoints[3].y));
                 int maxY = max(max(shapePoints[0].y, shapePoints[1].y), max(shapePoints[2].y, shapePoints[3].y));
                 curve.FillWithBezier(minX, minY, maxX, maxY, g_LineColor);
-                // Draw borders
                 Line line(hMemDC);
-                line.DrawLineDDA(minX, minY, maxX, minY, g_LineColor); // Top
-                line.DrawLineDDA(maxX, minY, maxX, maxY, g_LineColor); // Right
-                line.DrawLineDDA(maxX, maxY, minX, maxY, g_LineColor); // Bottom
-                line.DrawLineDDA(minX, maxY, minX, minY, g_LineColor); // Left
+                line.DrawLineDDA(minX, minY, maxX, minY, g_LineColor); 
+                line.DrawLineDDA(maxX, minY, maxX, maxY, g_LineColor); 
+                line.DrawLineDDA(maxX, maxY, minX, maxY, g_LineColor); 
+                line.DrawLineDDA(minX, maxY, minX, minY, g_LineColor); 
             }
             InvalidateRect(hWnd, NULL, FALSE);
             shapeClickCount = 0;
@@ -631,7 +574,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         }
         if (currentShape == SHAPE_FLOODFILL) {
             int algoSel = (int)SendMessageW(hComboAlgo, CB_GETCURSEL, 0, 0);
-            COLORREF boundaryColor = g_LineColor; // Use the current drawing color as the boundary
+            COLORREF boundaryColor = g_LineColor; 
             if (algoSel == 0) {
                 myFloodFill(hMemDC, x, y, boundaryColor, g_FillColor);
             } else {
@@ -661,17 +604,47 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             clipWindowPoints[shapeClickCount].y = y;
             shapeClickCount++;
             if (shapeClickCount < 4) return 0;
-            // After 4 points, set window
+            
             int algoSel = (int)SendMessageW(hComboAlgo, CB_GETCURSEL, 0, 0);
-            clipWindowIsSquare = (algoSel == 1); // 0: Rectangle, 1: Square
-            clipWindowSet = true;
-            UpdateClipWindowBounds();
-            // Draw window border in a visible color (e.g., red)
-            Line line(hMemDC);
-            line.DrawLineDDA(clipMinX, clipMinY, clipMaxX, clipMinY, RGB(255,0,0));
-            line.DrawLineDDA(clipMaxX, clipMinY, clipMaxX, clipMaxY, RGB(255,0,0));
-            line.DrawLineDDA(clipMaxX, clipMaxY, clipMinX, clipMaxY, RGB(255,0,0));
-            line.DrawLineDDA(clipMinX, clipMaxY, clipMinX, clipMinY, RGB(255,0,0));
+            bool newWindowIsSquare = (algoSel == 1);
+
+            int new_clipMinX = min(min(clipWindowPoints[0].x, clipWindowPoints[1].x), min(clipWindowPoints[2].x, clipWindowPoints[3].x));
+            int new_clipMaxX = max(max(clipWindowPoints[0].x, clipWindowPoints[1].x), max(clipWindowPoints[2].x, clipWindowPoints[3].x));
+            int new_clipMinY = min(min(clipWindowPoints[0].y, clipWindowPoints[1].y), min(clipWindowPoints[2].y, clipWindowPoints[3].y));
+            int new_clipMaxY = max(max(clipWindowPoints[0].y, clipWindowPoints[1].y), max(clipWindowPoints[2].y, clipWindowPoints[3].y));
+
+            if (newWindowIsSquare) {
+                int side = max(new_clipMaxX - new_clipMinX, new_clipMaxY - new_clipMinY);
+                new_clipMaxX = new_clipMinX + side;
+                new_clipMaxY = new_clipMinY + side;
+            }
+
+            if (!clipWindowSet) {
+                clipMinX = new_clipMinX;
+                clipMaxX = new_clipMaxX;
+                clipMinY = new_clipMinY;
+                clipMaxY = new_clipMaxY;
+                clipWindowSet = true;
+            }
+            else {
+                clipMinX = max(clipMinX, new_clipMinX);
+                clipMaxX = min(clipMaxX, new_clipMaxX);
+                clipMinY = max(clipMinY, new_clipMinY);
+                clipMaxY = min(clipMaxY, new_clipMaxY);
+            }
+            
+            if (clipMinX >= clipMaxX || clipMinY >= clipMaxY) {
+                clipWindowSet = false;
+            }
+
+            if(clipWindowSet){
+                Line line(hMemDC);
+                line.DrawLineDDA(clipMinX, clipMinY, clipMaxX, clipMinY, RGB(255,0,0));
+                line.DrawLineDDA(clipMaxX, clipMinY, clipMaxX, clipMaxY, RGB(255,0,0));
+                line.DrawLineDDA(clipMaxX, clipMaxY, clipMinX, clipMaxY, RGB(255,0,0));
+                line.DrawLineDDA(clipMinX, clipMaxY, clipMinX, clipMinY, RGB(255,0,0));
+            }
+
             InvalidateRect(hWnd, NULL, FALSE);
             shapeClickCount = 0;
             return 0;
@@ -725,7 +698,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 int xc = lineStart.x, yc = lineStart.y;
                 int R = (int)round(sqrt((lineEnd.x - xc) * (lineEnd.x - xc) + (lineEnd.y - yc) * (lineEnd.y - yc)));
                 Circle circle(hMemDC);
-                // Always draw the full circle first
                 circle.DrawCircleModifiedMidpoint(xc, yc, R, g_LineColor);
                 switch (algoSel) {
                 case 0: circle.FillQuarterWithCircles(xc, yc, R, 1); break;
@@ -786,7 +758,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     return 0;
 }
 
-// Message handler for about box.
 INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
     UNREFERENCED_PARAMETER(lParam);

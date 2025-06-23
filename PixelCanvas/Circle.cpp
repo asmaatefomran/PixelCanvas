@@ -20,19 +20,19 @@ void Circle::Draw8Points(int xc, int yc, int x, int y, COLORREF c) {
 }
 void Circle::Draw2Points(int xc, int yc, int x, int y, COLORREF c, int quarter) {
     switch (quarter) {
-        case 1:  // Top-right
+        case 1:  
             if (!clipWindowSet || (xc + x >= clipMinX && xc + x <= clipMaxX && yc - y >= clipMinY && yc - y <= clipMaxY)) SetPixel(hdc, xc + x, yc - y, c);
             if (!clipWindowSet || (xc + y >= clipMinX && xc + y <= clipMaxX && yc - x >= clipMinY && yc - x <= clipMaxY)) SetPixel(hdc, xc + y, yc - x, c);
             break;
-        case 2:  // Top-left
+        case 2:  
             if (!clipWindowSet || (xc - x >= clipMinX && xc - x <= clipMaxX && yc - y >= clipMinY && yc - y <= clipMaxY)) SetPixel(hdc, xc - x, yc - y, c);
             if (!clipWindowSet || (xc - y >= clipMinX && xc - y <= clipMaxX && yc - x >= clipMinY && yc - x <= clipMaxY)) SetPixel(hdc, xc - y, yc - x, c);
             break;
-        case 3:  // Bottom-left
+        case 3:  
             if (!clipWindowSet || (xc - x >= clipMinX && xc - x <= clipMaxX && yc + y >= clipMinY && yc + y <= clipMaxY)) SetPixel(hdc, xc - x, yc + y, c);
             if (!clipWindowSet || (xc - y >= clipMinX && xc - y <= clipMaxX && yc + x >= clipMinY && yc + x <= clipMaxY)) SetPixel(hdc, xc - y, yc + x, c);
             break;
-        case 4:  // Bottom-right
+        case 4:  
             if (!clipWindowSet || (xc + x >= clipMinX && xc + x <= clipMaxX && yc + y >= clipMinY && yc + y <= clipMaxY)) SetPixel(hdc, xc + x, yc + y, c);
             if (!clipWindowSet || (xc + y >= clipMinX && xc + y <= clipMaxX && yc + x >= clipMinY && yc + x <= clipMaxY)) SetPixel(hdc, xc + y, yc + x, c);
             break;
@@ -154,21 +154,20 @@ void Circle::FillWithCircles(int xc, int yc, int R) {
 }
 
 void Circle::Draw2Lines(int xc, int yc, int x, int y, COLORREF c, int quarter) {
-    // For all quarters, draw lines from center to arc points
     switch (quarter) {
-    case 1: // Top-right
+    case 1: 
         line.DrawLineDDA(xc, yc, xc + x, yc - y, c);
         line.DrawLineDDA(xc, yc, xc + y, yc - x, c);
         break;
-    case 2: // Top-left
+    case 2: 
         line.DrawLineDDA(xc, yc, xc - x, yc - y, c);
         line.DrawLineDDA(xc, yc, xc - y, yc - x, c);
         break;
-    case 3: // Bottom-left
+    case 3: 
         line.DrawLineDDA(xc, yc, xc - x, yc + y, c);
         line.DrawLineDDA(xc, yc, xc - y, yc + x, c);
         break;
-    case 4: // Bottom-right
+    case 4: 
         line.DrawLineDDA(xc, yc, xc + x, yc + y, c);
         line.DrawLineDDA(xc, yc, xc + y, yc + x, c);
         break;
@@ -207,10 +206,8 @@ void Circle::FillQuarterWithLines(int xc, int yc, int R, COLORREF c, int quarter
     }
 }
 void Circle::FillWithLines(int xc, int yc, int R, COLORREF c) {
-    // Draw the circle outline
     DrawCircleModifiedMidpoint(xc, yc, R, c);
-    // Fill with radial lines
-    const int numSteps = 360; // 1-degree steps
+    const int numSteps = 360; 
     for (int i = 0; i < numSteps; ++i) {
         double theta = 2 * 3.14 * i / numSteps;
         int x = static_cast<int>(round(xc + R * cos(theta)));

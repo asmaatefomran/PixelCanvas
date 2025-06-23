@@ -1,1 +1,12 @@
-﻿  PixelCanvas.vcxproj -> C:\Users\DELL\PixelCanvas\x64\Debug\PixelCanvas.exe
+﻿  PixelCanvas.cpp
+C:\Users\DELL\PixelCanvas\PixelCanvas\resource.h(18,9): warning C4005: 'IDM_ABOUT': macro redefinition
+  (compiling source file 'PixelCanvas.cpp')
+      C:\Users\DELL\PixelCanvas\PixelCanvas\resource.h(11,9):
+      see previous definition of 'IDM_ABOUT'
+  
+C:\Users\DELL\PixelCanvas\PixelCanvas\resource.h(19,9): warning C4005: 'IDM_EXIT': macro redefinition
+  (compiling source file 'PixelCanvas.cpp')
+      C:\Users\DELL\PixelCanvas\PixelCanvas\resource.h(12,9):
+      see previous definition of 'IDM_EXIT'
+  
+  PixelCanvas.vcxproj -> C:\Users\DELL\PixelCanvas\x64\Debug\PixelCanvas.exe
