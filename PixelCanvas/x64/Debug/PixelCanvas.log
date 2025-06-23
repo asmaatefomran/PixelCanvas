@@ -1,1 +1,14 @@
-﻿  PixelCanvas.vcxproj -> C:\Users\user\Source\Repos\PixelCanvas\x64\Debug\PixelCanvas.exe
+﻿  Curve.cpp
+C:\Users\DELL\PixelCanvas\PixelCanvas\resource.h(18,9): warning C4005: 'IDM_ABOUT': macro redefinition
+  (compiling source file 'Curve.cpp')
+      C:\Users\DELL\PixelCanvas\PixelCanvas\resource.h(11,9):
+      see previous definition of 'IDM_ABOUT'
+  
+C:\Users\DELL\PixelCanvas\PixelCanvas\resource.h(19,9): warning C4005: 'IDM_EXIT': macro redefinition
+  (compiling source file 'Curve.cpp')
+      C:\Users\DELL\PixelCanvas\PixelCanvas\resource.h(12,9):
+      see previous definition of 'IDM_EXIT'
+  
+C:\Users\DELL\PixelCanvas\PixelCanvas\Curve.cpp(53,42): warning C4244: 'argument': conversion from 'double' to 'int', possible loss of data
+C:\Users\DELL\PixelCanvas\PixelCanvas\Curve.cpp(53,32): warning C4244: 'argument': conversion from 'double' to 'int', possible loss of data
+  PixelCanvas.vcxproj -> C:\Users\DELL\PixelCanvas\x64\Debug\PixelCanvas.exe

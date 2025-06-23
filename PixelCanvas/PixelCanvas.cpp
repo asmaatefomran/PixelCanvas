@@ -533,16 +533,29 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             int algoSel = (int)SendMessageW(hComboAlgo, CB_GETCURSEL, 0, 0);
             Curve curve(hMemDC);
             if (currentShape == SHAPE_SQUARE) {
-                int minX = min(shapePoints[0].x, shapePoints[1].x);
-                int maxX = max(shapePoints[0].x, shapePoints[1].x);
-                int minY = min(shapePoints[0].y, shapePoints[1].y);
-                int maxY = max(shapePoints[0].y, shapePoints[1].y);
-                curve.FillWithHermite(minX, maxY, maxX, minY , g_FillColor);
+                // First click: bottom-left, second click: top-right
+                int x0 = shapePoints[0].x;
+                int y0 = shapePoints[0].y;
+                int x1 = shapePoints[1].x;
+                int y1 = shapePoints[1].y;
+                int dx = abs(x1 - x0);
+                int dy = abs(y1 - y0);
+                int side = max(dx, dy);
+                // Determine direction for x and y
+                int x_sign = (x1 >= x0) ? 1 : -1;
+                int y_sign = (y1 >= y0) ? 1 : -1;
+                int x2 = x0 + side * x_sign;
+                int y2 = y0 + side * y_sign;
+                int left = min(x0, x2);
+                int right = max(x0, x2);
+                int bottom = min(y0, y2);
+                int top = max(y0, y2);
+                curve.FillWithHermite(left, bottom, right, top, g_FillColor);
                 Line line(hMemDC);
-                line.DrawLineDDA(minX, minY, maxX, minY, g_LineColor);
-                line.DrawLineDDA(maxX, minY, maxX, maxY, g_LineColor);
-                line.DrawLineDDA(maxX, maxY, minX, maxY, g_LineColor);
-                line.DrawLineDDA(minX, maxY, minX, minY, g_LineColor);
+                line.DrawLineDDA(left, bottom, right, bottom, g_LineColor);
+                line.DrawLineDDA(right, bottom, right, top, g_LineColor);
+                line.DrawLineDDA(right, top, left, top, g_LineColor);
+                line.DrawLineDDA(left, top, left, bottom, g_LineColor);
             } else if (currentShape == SHAPE_RECTANGLE) {
                 int minX = min(shapePoints[0].x, shapePoints[1].x);
                 int maxX = max(shapePoints[0].x, shapePoints[1].x);

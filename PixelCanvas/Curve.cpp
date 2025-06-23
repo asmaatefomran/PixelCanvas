@@ -31,9 +31,12 @@ void Curve::DrawHermite(int x0, int y0, int x1, int y1, int t0, int t1, COLORREF
         }
 }
 void Curve::FillWithHermite(int x1, int y1, int x2, int y2, COLORREF color) {
-    int step = 1;
-    for (int x = x1; x <= x2; x += step) {
-        DrawHermite(x, y1, x, y2, 40, 40, color);
+    int left = min(x1, x2);
+    int right = max(x1, x2);
+    int top = min(y1, y2);
+    int bottom = max(y1, y2);
+    for (int x = left; x <= right; x++) {
+        DrawHermite2((double)x, (double)top, (double)x, (double)bottom, 0.0, 1.0, 0.0, -1.0, color);
     }
 }
 
@@ -76,13 +79,21 @@ void Curve::DrawBezier(int x0, int y0, int x1, int y1, int x2, int y2, int x3, i
                 3 * mt * pow(t, 2) * x2 + pow(t, 3) * x3);
             int y = (int)(pow(mt, 3) * y0 + 3 * pow(mt, 2) * t * y1 +
                 3 * mt * pow(t, 2) * y2 + pow(t, 3) * y3);
+            if (!clipWindowSet || (x >= clipMinX && x <= clipMaxX && y >= clipMinY && y <= clipMaxY))
             SetPixel(hdc, x, y, color);
         }
 }
 
 void Curve::FillWithBezier(int x1, int y1, int x2, int y2, COLORREF color) {
-    int step = 1;
-    for (int y = y1; y <= y2; y += step) {
-        DrawBezier(x1, y, x1 + 20, y - 20, x2 - 20, y + 20, x2, y, color);
+    int left = min(x1, x2);
+    int right = max(x1, x2);
+    int top = min(y1, y2);
+    int bottom = max(y1, y2);
+    for (int y = top; y <= bottom; y++) {
+        DrawBezier(left, y,
+                   left + (right - left) / 3, y,
+                   right - (right - left) / 3, y,
+                   right, y,
+                   color);
     }
 }
